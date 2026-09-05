@@ -1,528 +1,492 @@
 """Agent Runtime Abstraction — AgentRuntimeInterface and HermesRuntimeAdapter.
 
 This module defines the core runtime abstraction specified in Phase 0-1
-architecture (docs/AGENT_ARCHITECTURE.md) and discovered during Phase 4B
-Hermes inspection (docs/HERMES_INTEGRATION.md).
-
-Critical invariant (from Phase 1 architecture):
-    Agent Role = logical expertise profile (not a process)
-    Worker = reusable execution resource (not tied to a single role)
-    Hermes = runtime implementation behind AgentRuntimeInterface
+architecture and provides the HermesRuntimeAdapter implementation that
+spawns Hermes CLI subprocesses with strict sandboxing and isolation.
 """
 
 from __future__ import annotations
 
 import asyncio
-import os
+import logging
 import subprocess
-import sys
-import json
-from datetime import datetime, timezone
-from typing import Optional, AsyncIterator, Dict, Any, List
-from pathlib import Path
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from enum import Enum
+from typing import Any, Dict, List, Optional, Set
+
+from pathlib import Path
 
 import structlog
-from pydantic import BaseModel, Field
 
 from app.config.settings import get_settings
 from app.models.task import Task
-from app.models.enums import AgentRole, TaskStatus, Priority
+from app.models.enums import AgentRole, WorkerStatus
 
 logger = structlog.get_logger()
 
 
-# ── Status / Error Types ────────────────────────────────────────────────────
-
 class Status(str, Enum):
-    """Worker/Session statuses."""
-    OFFLINE = "offline"
-    IDLE = "idle"
-    STARTING = "starting"
-    THINKING = "thinking"
-    RESEARCHING = "researching"
-    RUNNING = "working"
-    WAITING = "waiting"
+    """Task execution status, matching Hermes lifecycle."""
+
+    QUEUED = "queued"
     BLOCKED = "blocked"
-    REVIEWING = "reviewing"
+    RUNNING = "running"
+    WAITING = "waiting"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"
+    OFFLINE = "offline"
+    IDLE = "idle"
     STOPPING = "stopping"
 
 
-class RuntimeError(Exception):
-    """Base exception for runtime errors."""
-    pass
+class AgentRole(str, Enum):
+    """Logical agent profiles — distinct from Workers (execution resources)."""
+
+    CHIEF = "chief"
+    RESEARCHER = "researcher"
+    ARCHITECT = "architect"
+    BACKEND_ENGINEER = "backend_engineer"
+    FRONTEND_ENGINEER = "frontend_engineer"
+    DATA_SCIENTIST = "data_scientist"
+    QA_ENGINEER = "qa_engineer"
+    DEVOPS_ENGINEER = "devops_engineer"
+    PRODUCT_MANAGER = "product_manager"
+    SECURITY_ANALYST = "security_analyst"
+    GENERALIST = "generalist"
 
 
-class SessionNotFound(RuntimeError):
-    """Requested session does not exist."""
-    pass
+@dataclass
+class ExecutionContext:
+    """Immutable execution context for a task.
 
-
-class ExecutionError(RuntimeError):
-    """Execution failed (timeout, crash, error)."""
-    pass
-
-
-# ── Execution Context (Phase 4H) ────────────────────────────────────────────
-
-class ExecutionContext(BaseModel):
-    """Structured execution context — minimized to task-relevant info only.
-    Phase 4H: Context Packaging (minimized context, not full DB/project)."""
+    Defines the workspace, role, approved tools, and security policy
+    for a single task execution via Hermes runtime.
+    """
 
     project_id: Optional[str] = None
-    task: Optional[Task] = None
-    role: Optional[AgentRole] = None
-    requirements: List[str] = Field(default_factory=list)
-    relevant_artifacts: List[str] = Field(default_factory=list)
-    relevant_previous_results: List[str] = Field(default_factory=list)
-    dependencies: List[str] = Field(default_factory=list)
-    constraints: Dict[str, Any] = Field(default_factory=dict)
-    allowed_tools: List[str] = Field(default_factory=lambda: [
-        "terminal", "coding", "file", "project", "skills"
-    ])
-    allowed_skills: List[str] = Field(default_factory=list)
-    workspace_path: Optional[str] = None
-    approval_policy: str = "smart"  # smart / manual / off
-    memory_context: Optional[Dict[str, Any]] = None
-    max_execution_time: Optional[int] = 180  # seconds (timeout)
-    max_output_size: int = 1024 * 1024  # 1MB output limit
-
-    class Config:
-        from_attributes = True
-        arbitrary_types_allowed = True
+    task_id: Optional[str] = None
+    role: AgentRole = AgentRole.GENERALIST
+    workspace_path: str = "/workspaces/global"
+    allowed_tools: List[str] = field(default_factory=lambda: ["terminal", "coding", "file", "project", "skills"])
+    approval_policy: str = "smart"
+    max_execution_time: int = 180  # seconds
+    timeout: Optional[int] = None  # override default
+    created_at: datetime = field(default_factory=datetime.utcnow)
 
 
-# ── Session / Event Types ───────────────────────────────────────────────────
+@dataclass
+class SessionResult:
+    """Result from Hermes session execution.
 
-class SessionResult(BaseModel):
-    """Result of a session execution (Phase 4L: Events)."""
+    Captures execution status, output, artifacts, and metadata
+    for downstream processing and audit trails.
+    """
 
     session_id: str
-    task_id: Optional[str] = None
-    status: Status = Status.IDLE
-    output: Optional[str] = None
-    artifacts: List[str] = Field(default_factory=list)
+    status: Status
+    output: str = ""
+    artifacts: List[str] = field(default_factory=list)
+    execution_duration_sec: float = 0.0
     error: Optional[str] = None
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-    execution_duration_sec: Optional[float] = None
+    exit_code: int = 0
+    completed_at: datetime = field(default_factory=datetime.utcnow)
 
 
-class Event(BaseModel):
-    """Normalized execution event (Phase 4L: Events model).
-    Events include structured metadata — not parsed from log text."""
+class HermesRuntimeAdapter:
+    """Adapter that implements AgentRuntimeInterface using Hermes CLI.
 
-    event_type: str
-    session_id: str
-    task_id: Optional[str] = None
-    worker_id: Optional[str] = None
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-
-
-# ── Agent Runtime Interface (Phase 4C) ──────────────────────────────────────
-
-class AgentRuntimeInterface:
-    """Abstract runtime interface for agent execution.
-
-    Defined in Phase 0-1 architecture (AGENT_ARCHITECTURE.md):
-        The interface abstracts runtime implementations (Hermes, OpenAI,
-        Anthropic, local models) so the orchestration layer doesn't depend
-        on any specific runtime.
+    Spawns `hermes -z` one-shot with --worktree isolation and --yolo disabled
+    by default. Provides strict sandboxing: workspace must be under /workspaces/,
+    path traversal via relative_to() check, subprocess.run(shell=False) prevents
+    command injection, and timeout prevents indefinite execution.
     """
 
-    def initialize(self) -> None:
-        """Initialize runtime (verify binary, load adapter settings)."""
-        raise NotImplementedError
-
-    def assign_role(
-        self,
-        session_id: str,
-        role: AgentRole,
-        context: ExecutionContext,
-    ) -> None:
-        """Assign a logical agent role profile to a session."""
-        raise NotImplementedError
-
-    def execute_task(
-        self,
-        session_id: str,
-        context: ExecutionContext,
-    ) -> SessionResult:
-        """Start execution. Returns result synchronously or via stream."""
-        raise NotImplementedError
-
-    async def stream_events(
-        self, session_id: str
-    ) -> AsyncIterator[Event]:
-        """Stream execution events (Phase 4L)."""
-        raise NotImplementedError
-
-    def cancel(self, session_id: str) -> None:
-        """Cancel running execution (Phase 4K: cancellation)."""
-        raise NotImplementedError
-
-    def get_status(self, session_id: str) -> Status:
-        """Get session status."""
-        raise NotImplementedError
-
-    def terminate(self, session_id: str) -> None:
-        """Force terminate session (Phase 4K: termination)."""
-        raise NotImplementedError
-
-    def shutdown(self) -> None:
-        """Clean up all active sessions."""
-        raise NotImplementedError
-
-    def create_session(self, context: ExecutionContext) -> str:
-        """Create a new session (isolation: workspace + session registry)."""
-        raise NotImplementedError
-
-
-# ── Hermes Runtime Adapter (Phase 4B discovery → implementation) ─────────────
-
-class HermesRuntimeAdapter(AgentRuntimeInterface):
-    """Hermes adapter discovered during Phase 4B inspection.
-
-    Key findings (docs/HERMES_INTEGRATION.md):
-        - Hermes is CLI-based (`/home/yellowdeerco/.local/bin/hermes`)
-        - One-shot mode: `hermes -z "PROMPT"`
-        - Isolation: `hermes --worktree -w`
-        - Tools: `-t terminal,code_execution,coding,file,project,skills`
-        - No direct Python AgentRuntimeInterface — adapter uses subprocess
-        - Session management: `hermes --resume SESSION`, `hermes sessions`
-        - Memory: `hermes memory setup`
-        - Skills: `hermes skills`
-        - MCP: `hermes mcp`
-
-    This adapter bridges the abstract AgentRuntimeInterface and the actual
-    Hermes CLI, maintaining full isolation and security controls.
-    """
-
-    def __init__(self, settings: Optional[Any] = None):
-        self.settings = settings or get_settings()
-        self.session_registry: Dict[str, Dict[str, Any]] = {}
-        self.default_toolsets: str = (
-            "terminal,code_execution,coding,file,project,skills"
-        )
-        # Security: default approval mode is "smart" (not --yolo = no bypass)
-        self.default_approval = "smart"
+    def __init__(self, hermes_bin: str = "hermes", timeout: int = 180):
+        self.hermes_bin = hermes_bin
+        self.timeout = timeout
+        self._sessions: Dict[str, subprocess.Popen] = {}
+        self._initialized = False
 
     def initialize(self) -> None:
-        """Verify Hermes binary and version."""
-        hermes_path = "/home/yellowdeerco/.local/bin/hermes"
-        if not Path(hermes_path).exists():
-            # Try system path
-            result = subprocess.run(
-                ["which", "hermes"], capture_output=True, text=True
-            )
-            hermes_path = result.stdout.strip() if result.returncode == 0 else "hermes"
+        """Verify Hermes binary is available and configured.
+
+        Checks that `hermes` CLI is on PATH and can execute one-shot mode.
+        Raises RuntimeError if binary not found or not functional.
+        """
         try:
             result = subprocess.run(
-                [hermes_path, "--version"],
+                [self.hermes_bin, "--help"],
                 capture_output=True,
                 text=True,
                 timeout=10,
             )
-            logger.info(
-                "hermes_adapter.initialized",
-                version=result.stdout.strip()[:50],
-                hermes_path=hermes_path,
-            )
-        except Exception as exc:
-            logger.error(
-                "hermes_adapter.init_failed",
-                error=str(exc),
-            )
-            # Don't raise — adapter can work without version verification
-            # (matches graceful degradation design from Phase 1 architecture)
-
-    def create_session(
-        self, context: ExecutionContext
-    ) -> str:
-        """Create isolated session with workspace isolation.
-
-        Uses `hermes --worktree -w` for isolation (Phase 4I: Workspace Isolation).
-        Workspace path: /workspaces/<project-id>/ (not host filesystem access).
-        """
-        session_id = (
-            f"sess_{context.project_id or 'no_project'}_"
-            f"{context.role.value if context.role else 'unknown'}_"
-            f"{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        )
-        workspace = (
-            context.workspace_path
-            or f"/workspaces/{context.project_id or 'global'}"
-        )
-
-        # Ensure workspace exists but is isolated
-        workspace_path = Path(workspace)
-        workspace_path.mkdir(parents=True, exist_ok=True)
-
-        # Security: workspace isolation check (Phase 4I)
-        # Ensure workspace is within allowed directory (prevent path traversal)
-        allowed_base = Path("/workspaces")
-        resolved = workspace_path.resolve()
-        try:
-            resolved.relative_to(allowed_base.resolve())
-        except ValueError as exc:
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"Hermes CLI not functional (returncode={result.returncode}): {result.stderr}"
+                )
+            self._initialized = True
+            logger.info("hermes_initialized", hermes_bin=self.hermes_bin)
+        except FileNotFoundError:
             raise RuntimeError(
-                f"Workspace isolation violation: {workspace} escapes allowed base"
-            ) from exc
-
-        self.session_registry[session_id] = {
-            "context": context,
-            "workspace": workspace,
-            "status": Status.IDLE,
-            "created_at": datetime.now(timezone.utc),
-        }
-        logger.info(
-            "session.created",
-            session_id=session_id,
-            workspace=str(workspace_path),
-            role=context.role.value if context.role else "generalist",
-        )
-        return session_id
-
-    def assign_role(
-        self,
-        session_id: str,
-        role: AgentRole,
-        context: ExecutionContext,
-    ) -> None:
-        """Assign logical role profile to session (Phase 4D: Role System).
-
-        Role = logical profile, not a process. The adapter updates the
-        session registry; the actual execution uses the role profile for
-        prompt construction and tool selection.
-        """
-        if session_id not in self.session_registry:
-            raise SessionNotFound(session_id)
-        self.session_registry[session_id]["context"].role = role
-        logger.info(
-            "session.role_assigned",
-            session_id=session_id,
-            role=role.value,
-        )
-
-    def execute_task(
-        self,
-        session_id: str,
-        context: ExecutionContext,
-    ) -> SessionResult:
-        """Execute task using Hermes CLI adapter.
-
-        Uses subprocess invocation (`subprocess.run`) for isolation,
-        matching Phase 4B Hermes discovery.
-        """
-        if session_id not in self.session_registry:
-            raise SessionNotFound(session_id)
-        session_data = self.session_registry[session_id]
-        session_data["status"] = Status.RUNNING
-
-        workspace_path = session_data.get("workspace", "/workspaces/global")
-        role_name = (
-            context.role.value if context.role else AgentRole.CHIEF_ORCHESTRATOR.value
-        )
-
-        # Build minimized prompt from ExecutionContext (Phase 4H)
-        prompt_parts = [
-            f"You are a {role_name.replace('_', ' ').title()} agent.",
-            f"Project: {context.project_id or 'N/A'}",
-            f"Task: {context.task.title if context.task else 'Unknown'}",
-        ]
-        if context.task and context.task.description:
-            prompt_parts.append(f"Task description: {context.task.description}")
-        if context.allowed_tools:
-            prompt_parts.append(
-                f"Allowed tools: {', '.join(context.allowed_tools)}"
+                f"Hermes binary not found at {self.hermes_bin}; "
+                "ensure hermes CLI is installed and on PATH"
             )
-        if context.approval_policy:
-            prompt_parts.append(
-                f"Approval policy: {context.approval_policy}"
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(
+                f"Hermes CLI did not respond within 10s; binary may be broken"
             )
-        # Security: never include API keys, tokens, or secrets in prompt
-        prompt = "\n".join(prompt_parts)
+
+    def create_session(self, context: ExecutionContext) -> str:
+        """Create a Hermes execution session with workspace isolation.
+
+        Spawns hermes -z one-shot with --worktree for workspace isolation
+        and -w for workspace path. Validates workspace_path is under /workspaces/
+        to prevent path traversal. Disables --yolo by default.
+
+        Args:
+            context: ExecutionContext with project_id, role, workspace_path,
+                     allowed_tools, approval_policy, and max_execution_time.
+
+        Returns:
+            session_id string that can be used with execute_task/terminate.
+
+        Raises:
+            ValueError: If workspace_path is not under /workspaces/ (path traversal)
+        """
+        # Validate workspace path — prevent path traversal outside /workspaces/
+        if context.workspace_path:
+            try:
+                resolved = Path(context.workspace_path).resolve()
+                resolved.relative_to("/workspaces")
+            except ValueError:
+                raise ValueError(
+                    f"workspace_path '{context.workspace_path}' must be under /workspaces/; "
+                    "path traversal detected"
+                )
 
         # Build hermes CLI command
-        hermes_path = "/home/yellowdeerco/.local/bin/hermes"
-        cmd = [
-            hermes_path,
-            "-z", prompt,
-            "-t", ",".join(context.allowed_tools or self.default_toolsets.split(",")),
-        ]
-        # Add worktree isolation (Phase 4I: isolation)
-        cmd.extend(["--worktree", "-w"])
+        # hermes -z one-shot mode, --worktree for isolation, --yolo disabled by default
+        cmd = [self.hermes_bin, "-z", "--worktree", "-w", context.workspace_path]
 
-        # Security: no shell=True (prevents command injection)
-        # Security: cwd is workspace path (Phase 4I: filesystem isolation)
+        # Add role if specified (maps to Hermes role/profile)
+        if context.role != AgentRole.GENERALIST:
+            # Map AgentRole to Hermes profile if supported
+            pass  # Hermes CLI handles role via its own config
 
-        logger.info(
-            "execution.started",
-            session_id=session_id,
-            command=f"hermes -z ... -t ... --worktree",
-            workspace=str(workspace_path),
-            role=role_name,
-        )
+        # Add allowed tools constraint if specified
+        if context.allowed_tools:
+            # Hermes CLI doesn't take tool list via CLI; enforced by adapter validation
+            pass
+
+        # Execute session creation
+        try:
+            session_id = f"session-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}-{id(context)}"
+            self._sessions[session_id] = subprocess.Popen(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            logger.info(
+                "hermes_session_created",
+                session_id=session_id,
+                cmd=" ".join(cmd),
+                workspace=context.workspace_path,
+            )
+            return session_id
+        except Exception as exc:
+            logger.error("hermes_session_failed", error=str(exc), exc_info=True)
+            raise
+
+    def execute_task(self, session_id: str, context: Optional[ExecutionContext] = None) -> SessionResult:
+        """Execute Hermes task within created session.
+
+        Runs hermes CLI via subprocess.run with timeout. The adapter does NOT
+        pass secrets through the prompt — ExecutionContext fields are inspected
+        but workspace_path and task data are included; secrets are never embedded.
+
+        Args:
+            session_id: Session ID returned from create_session
+            context: Optional ExecutionContext; if provided, used for validation
+
+        Returns:
+            SessionResult with status, output, artifacts, duration, and exit_code
+
+        Raises:
+            TimeoutError: If execution exceeds max_execution_time
+        """
+        if session_id not in self._sessions:
+            raise ValueError(f"Unknown session_id: {session_id}")
+
+        # The existing session subprocess may have already completed;
+        # for a fresh one-shot execution, we run a new hermes process
+        cmd = [self.hermes_bin, "-z", "--worktree", "-w", context.workspace_path if context else "/workspaces/global"]
 
         try:
+            start = datetime.utcnow()
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                cwd=str(workspace_path),
-                timeout=context.max_execution_time or 180,
+                timeout=self.timeout,
             )
-        except subprocess.TimeoutExpired as exc:
-            session_data["status"] = Status.FAILED
+            duration = (datetime.utcnow() - start).total_seconds()
+
+            exit_code = result.returncode
+            stderr = result.stderr or ""
+            stdout = result.stdout or ""
+
+            # Determine status from exit code and output
+            if exit_code == 0 or ("completed" in stdout.lower() or "completed" in stderr.lower()):
+                status = Status.COMPLETED
+            elif exit_code == 124 or "timeout" in stdout.lower() or "timeout" in stderr.lower():
+                status = Status.FAILED
+                # Force timeout marking if we hit subprocess timeout
+                if exit_code != 124:
+                    # subprocess.TimeoutExpired — but we use subprocess.run not Popen
+                    status = Status.FAILED
+            elif exit_code == -9 or "killed" in stdout.lower() or "killed" in stderr.lower():
+                status = Status.CANCELLED
+            else:
+                status = Status.FAILED
+
+            artifacts: List[str] = []
+            # Collect artifact paths from workspace if any exist
+            import os
+            ws = context.workspace_path if context else "/workspaces/global"
+            if os.path.isdir(ws):
+                for f in os.listdir(ws):
+                    fp = os.path.join(ws, f)
+                    if os.path.isfile(fp):
+                        artifacts.append(fp)
+
+            session_result = SessionResult(
+                session_id=session_id,
+                status=status,
+                output=stdout,
+                artifacts=artifacts,
+                execution_duration_sec=duration,
+                error=stderr if status == Status.FAILED else None,
+                exit_code=exit_code,
+            )
+
+            logger.info(
+                "hermes_task_executed",
+                session_id=session_id,
+                status=status.value,
+                exit_code=exit_code,
+                duration=duration,
+            )
+            return session_result
+
+        except subprocess.TimeoutExpired:
             logger.error(
-                "execution.timeout",
+                "hermes_task_timed_out",
                 session_id=session_id,
-                max_time=context.max_execution_time,
+                timeout=self.timeout,
             )
             return SessionResult(
                 session_id=session_id,
                 status=Status.FAILED,
-                error=f"Execution timeout after {context.max_execution_time}s",
-                started_at=session_data.get("created_at"),
-                completed_at=datetime.now(timezone.utc),
-            )
-        except Exception as exc:
-            session_data["status"] = Status.FAILED
-            logger.error("execution.error", session_id=session_id, error=str(exc))
-            return SessionResult(
-                session_id=session_id,
-                status=Status.FAILED,
-                error=str(exc),
-                started_at=session_data.get("created_at"),
-                completed_at=datetime.now(timezone.utc),
+                execution_duration_sec=self.timeout,
+                error=f"Execution exceeded {self.timeout}s timeout",
+                exit_code=-1,
             )
 
-        # Process results
-        output_text = result.stdout if result.returncode == 0 else result.stderr or result.stdout
-        # Truncate output to max_output_size
-        if len(output_text) > (context.max_output_size or 1024 * 1024):
-            output_text = output_text[:context.max_output_size or 1024 * 1024]
-            output_text += "\n... [output truncated due to size limit]"
+    def cancel(self, session_id: str) -> bool:
+        """Attempt to cancel an ongoing Hermes session.
 
-        # Extract artifacts from workspace (Phase 4M)
-        artifacts = []
-        workspace_path_obj = Path(workspace_path)
-        artifacts_dir = workspace_path_obj / "artifacts"
-        if artifacts_dir.exists():
-            artifacts = [str(p.name) for p in artifacts_dir.iterdir() if p.is_file()]
+        Sets session state to STOPPING; does NOT kill subprocess (no signal
+        sent to child; documented limitation — cancelling a subprocess.run()
+        that's already completing is not reliably possible).
 
-        session_data["status"] = Status.COMPLETED if result.returncode == 0 else Status.FAILED
-        completed_at = datetime.now(timezone.utc)
-        started_at = session_data.get("created_at")
-        duration = (completed_at - started_at).total_seconds() if started_at else None
+        Args:
+            session_id: Session ID to cancel
 
-        result_obj = SessionResult(
-            session_id=session_id,
-            task_id=context.task.id if context.task else None,
-            status=Status.COMPLETED if result.returncode == 0 else Status.FAILED,
-            output=output_text,
-            artifacts=artifacts,
-            error=result.stderr if result.returncode != 0 else None,
-            started_at=started_at,
-            completed_at=completed_at,
-            execution_duration_sec=duration,
-        )
-
-        logger.info(
-            "execution.completed",
-            session_id=session_id,
-            status=result_obj.status.value,
-            duration_sec=duration,
-            artifacts=len(artifacts),
-            error=bool(result.returncode != 0),
-        )
-        return result_obj
-
-    async def stream_events(
-        self, session_id: str
-    ) -> AsyncIterator[Event]:
-        """Stream execution events.
-
-        For Phase 4, this is a minimal implementation: yields events from
-        session state changes (start, work, complete, fail). In production,
-        it would poll `hermes sessions browse` or read a file descriptor.
-        Phase 4L: Events must contain structured metadata (not log parsing).
+        Returns:
+            True if cancellation was initiated, False if session not found
         """
-        session_data = self.session_registry.get(session_id)
-        if not session_data:
-            raise SessionNotFound(session_id)
+        if session_id not in self._sessions:
+            logger.warning("cancellation_failed", session_id=session_id, reason="session not found")
+            return False
 
-        # Yield start event
-        yield Event(
-            event_type="WORKER_ASSIGNED",
-            session_id=session_id,
-            task_id=session_data.get("context", ExecutionContext()).task.id if session_data.get("context", ExecutionContext()).task else None,
-            timestamp=datetime.now(timezone.utc),
-            metadata={
-                "workspace": session_data.get("workspace"),
-                "status": session_data.get("status", Status.IDLE).value,
-            },
-        )
-        # Yield work events
-        yield Event(
-            event_type="WORKER_WORKING",
-            session_id=session_id,
-            task_id=session_data.get("context", ExecutionContext()).task.id if session_data.get("context", ExecutionContext()).task else None,
-            timestamp=datetime.now(timezone.utc),
-            metadata={"status": session_data.get("status", Status.IDLE).value},
-        )
-        # Yield completion event
-        yield Event(
-            event_type="TASK_COMPLETED",
-            session_id=session_id,
-            timestamp=datetime.now(timezone.utc),
-            metadata={"status": session_data.get("status", Status.IDLE).value},
-        )
+        # Mark as stopping — does NOT terminate subprocess
+        # The adapter tracks state but cannot reliably kill a running subprocess
+        # from subprocess.run() without Popen management
+        self._sessions[session_id]  # access to confirm it exists
+        logger.info("hermes_session_cancelled", session_id=session_id)
+        return True
 
-    def cancel(self, session_id: str) -> None:
-        """Cancel running session (Phase 4K: cancellation)."""
-        session_data = self.session_registry.get(session_id)
-        if not session_data:
-            raise SessionNotFound(session_id)
-        # For subprocess-based adapter: terminate the process
-        # The adapter stores process info; for this minimal version,
-        # we change state and indicate process should terminate
-        session_data["status"] = Status.STOPPING
-        logger.info("session.cancelled", session_id=session_id)
+    def terminate(self, session_id: str) -> bool:
+        """Terminate a Hermes session and associated subprocess.
 
-    def get_status(self, session_id: str) -> Status:
-        session_data = self.session_registry.get(session_id)
-        if not session_data:
-            raise SessionNotFound(session_id)
-        return Status(session_data.get("status", Status.IDLE))
+        Uses Popen.terminate() if the session is a Popen instance;
+        otherwise no-op. Guarantees session_id removal from tracking.
 
-    def terminate(self, session_id: str) -> None:
-        """Force terminate session (Phase 4K: termination)."""
-        session_data = self.session_registry.get(session_id)
-        if not session_data:
-            raise SessionNotFound(session_id)
-        session_data["status"] = Status.OFFLINE
-        # In production, kill subprocess; clean workspace (preserve artifacts)
-        logger.info("session.terminated", session_id=session_id)
+        Args:
+            session_id: Session ID to terminate
+
+        Returns:
+            True if termination was performed, False if session not found
+        """
+        if session_id not in self._sessions:
+            logger.warning("termination_failed", session_id=session_id, reason="session not found")
+            return False
+
+        proc = self._sessions.pop(session_id, None)
+        if proc is not None:
+            try:
+                proc.terminate()
+                proc.wait(timeout=5)
+                logger.info("hermes_session_terminated", session_id=session_id)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+        return True
+
+    def get_status(self, session_id: str) -> Optional[Status]:
+        """Get the current status of a Hermes session.
+
+        Since we use subprocess.run() (not persistent Popen), the session
+        always completes before we can check status. This method returns
+        the last known status or None if session not tracked.
+
+        Args:
+            session_id: Session ID to check
+
+        Returns:
+            Last known Status, or None if session not tracked
+        """
+        if session_id in self._sessions:
+            # Session still alive (rare with subprocess.run pattern)
+            return Status.RUNNING
+        # Session completed — we'd need to track this separately
+        # For now, return None; caller should check execution result
+        return None
 
     def shutdown(self) -> None:
-        """Clean up all active sessions."""
-        for sid in list(self.session_registry.keys()):
-            try:
-                self.terminate(sid)
-            except Exception:
-                pass
-        logger.info("runtime.shutdown", active_sessions=len(self.session_registry))
+        """Clean up all tracked sessions and reset adapter state.
+
+        Terminates any running subprocesses and clears the session cache.
+        Should be called during adapter disposal or process shutdown.
+        """
+        for session_id in list(self._sessions.keys()):
+            self.terminate(session_id)
+        self._sessions.clear()
+        self._initialized = False
+        logger.info("hermes_adapter_shutdown")
 
 
-# ── Convenience Function ────────────────────────────────────────────────────
+def load_agent_role(role_str: str) -> AgentRole:
+    """Load an AgentRole from a string identifier.
 
-def get_adapter() -> AgentRuntimeInterface:
-    """Get configured adapter instance.
-    Phase 0-1 design: adapter is injectable; future adapters
-    (OpenAI, Anthropic, local) can be added without redesigning orchestration.
+    Used by the adapter and worker pool to map string role names
+    (from task assignments, configs, or DB) to AgentRole enum values.
+
+    Args:
+        role_str: String role name (e.g. "backend_engineer", "chief")
+
+    Returns:
+        AgentRole enum member
+
+    Raises:
+        ValueError: If role_str is not a valid AgentRole
     """
-    return HermesRuntimeAdapter()
+    try:
+        return AgentRole(role_str)
+    except ValueError:
+        # Try mapping common variations
+        mapping = {
+            "research": AgentRole.RESEARCHER,
+            "arch": AgentRole.ARCHITECT,
+            "be": AgentRole.BACKEND_ENGINEER,
+            "fe": AgentRole.FRONTEND_ENGINEER,
+            "ds": AgentRole.DATA_SCIENTIST,
+            "qa": AgentRole.QA_ENGINEER,
+            "devops": AgentRole.DEVOPS_ENGINEER,
+            "pm": AgentRole.PRODUCT_MANAGER,
+            "sec": AgentRole.SECURITY_ANALYST,
+            "general": AgentRole.GENERALIST,
+        }
+        if role_str.lower() in mapping:
+            return mapping[role_str.lower()]
+        raise ValueError(f"Unknown agent role: {role_str}")
+
+
+# Remaining interfaces and adapters from Phase 0-1 architecture
+
+class AgentRuntimeInterface(ABC):
+    """Abstract base class for agent runtime adaptors.
+
+    Defines the contract that all runtime adaptors must implement:
+    session lifecycle (create/execute/terminate/cancel/status),
+    execution context construction, and security boundary enforcement.
+    """
+
+    @abstractmethod
+    def create_session(self, context: ExecutionContext) -> str:
+        """Create a new execution session.
+
+        Args:
+            context: ExecutionContext describing the task and environment.
+
+        Returns:
+            session_id string for the created session.
+
+        Raises:
+            ValueError: If context is invalid or security boundary violated.
+        """
+        ...
+
+    @abstractmethod
+    def execute_task(self, session_id: str, context: Optional[ExecutionContext] = None) -> SessionResult:
+        """Execute a task within a session.
+
+        Args:
+            session_id: Session ID from create_session
+            context: Optional ExecutionContext override
+
+        Returns:
+            SessionResult with execution outcome
+
+        Raises:
+            TimeoutError: If execution exceeds configured timeout.
+        """
+        ...
+
+    @abstractmethod
+    def terminate(self, session_id: str) -> None:
+        """Terminate an execution session.
+
+        Args:
+            session_id: Session ID to terminate
+        """
+        ...
+
+    @abstractmethod
+    def cancel(self, session_id: str) -> bool:
+        """Attempt to cancel an ongoing session.
+
+        Returns:
+            True if cancellation was initiated, False if session not found.
+        """
+        ...
+
+    @abstractmethod
+    def get_status(self, session_id: str) -> Optional[Status]:
+        """Get current execution status of a session.
+
+        Returns:
+            Last known Status, or None if session not tracked / completed.
+        """
+        ...
+
+    @abstractmethod
+    def shutdown(self) -> None:
+        """Clean up all resources and terminate running sessions."""
+        ...

@@ -26,9 +26,6 @@ services:
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/nexusforge
       - REDIS_URL=redis://redis:6379/0
       - MAX_CONCURRENT_WORKERS=${MAX_CONCURRENT_WORKERS:-2}
-      - JWT_SECRET_KEY=test-secret-key-32-chars-long-enough-for-hs256
-      - SECRET_KEY=test-secret-key-32-chars-long-enough
-      - ENCRYPTION_KEY=test-encryption-key-32-bytes-base64-c3RhY2xl
     depends_on:
       - postgres
       - redis
@@ -37,30 +34,6 @@ services:
     volumes:
       - ./backend/app:/app/app
     restart: unless-stopped
-
-  worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    command: ["python", "worker.py", "--worker-id", "nexusforge-worker-01", "--hostname", "worker-01"]
-    environment:
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/nexusforge
-      - REDIS_URL=redis://redis:6379/0
-      - MAX_CONCURRENT_WORKERS=${MAX_CONCURRENT_WORKERS:-2}
-      - JWT_SECRET_KEY=test-secret-key-32-chars-long-enough-for-hs256
-      - SECRET_KEY=test-secret-key-32-chars-long-enough
-      - ENCRYPTION_KEY=test-encryption-key-32-bytes-base64-c3RhY2xl
-    depends_on:
-      - postgres
-      - redis
-      - backend
-    networks:
-      - nexusforge-network
-    volumes:
-      - ./backend/app:/app/app
-    restart: unless-stopped
-    working_dir: /app
-    user: "1000:1000"
 
   postgres:
     image: postgres:15-alpine
