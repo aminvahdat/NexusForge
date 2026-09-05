@@ -102,6 +102,18 @@ services:
       timeout: 5s
       retries: 5
 
+frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - nexusforge-network
+    restart: unless-stopped
+
 networks:
   nexusforge-network:
     driver: bridge
