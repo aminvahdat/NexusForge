@@ -1,20 +1,26 @@
 version: "3.8"
 
 services:
-  frontend:
+
+  migrations:
     build:
-      context: ./frontend
+      context: .
       dockerfile: Dockerfile
-    ports:
-      - "3000:3000"
     environment:
-      - REACT_APP_API_URL=http://backend:8000
+      - DATABASE_URL=postgresql://postgres:@postgres:5432/nexusforge
     depends_on:
-      - backend
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["alembic", "upgrade", "head"]
     networks:
       - nexusforge-network
     volumes:
-      - ./frontend/src:/app/src
+      - ./backend/app:/app/app
+    restart: "no"
+    user: "1000:1000"
+    working_dir: /app
 
   backend:
     build:
@@ -23,7 +29,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/nexusforge
+      - DATABASE_URL=postgresql://postgres:@postgres:5432/nexusforge
       - REDIS_URL=redis://redis:6379/0
       - MAX_CONCURRENT_WORKERS=${MAX_CONCURRENT_WORKERS:-2}
       - JWT_SECRET_KEY=test-secret-key-32-chars-long-enough-for-hs256
@@ -32,6 +38,7 @@ services:
     depends_on:
       - postgres
       - redis
+      - migrations
     networks:
       - nexusforge-network
     volumes:
@@ -44,12 +51,12 @@ services:
       dockerfile: Dockerfile
     command: ["python", "worker.py", "--worker-id", "nexusforge-worker-01", "--hostname", "worker-01"]
     environment:
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/nexusforge
+      - DATABASE_URL=postgresql://postgres:@postgres:5432/nexusforge
       - REDIS_URL=redis://redis:6379/0
       - MAX_CONCURRENT_WORKERS=${MAX_CONCURRENT_WORKERS:-2}
       - JWT_SECRET_KEY=test-secret-key-32-chars-long-enough-for-hs256
       - SECRET_KEY=test-secret-key-32-chars-long-enough
-      - ENCRYPTION_KEY=test-encryption-key-32-bytes-base64-c3RhY2xl
+      - ENCRYPTION_KEY=test-encryption-key-32-bytes-base64-c3RhY2tl
     depends_on:
       - postgres
       - redis

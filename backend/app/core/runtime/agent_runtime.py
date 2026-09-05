@@ -175,8 +175,8 @@ class HermesRuntimeAdapter:
                 )
 
         # Build hermes CLI command
-        # hermes -z one-shot mode, --worktree for isolation, --yolo disabled by default
-        cmd = [self.hermes_bin, "-z", "--worktree", "-w", context.workspace_path]
+        # hermes chat -q for one-shot with workspace, -Q for quiet
+        cmd = [self.hermes_bin, "chat", "-q", context.task_prompt, "--in", context.workspace_path, "-Q"]
 
         # Add role if specified (maps to Hermes role/profile)
         if context.role != AgentRole.GENERALIST:
@@ -230,7 +230,7 @@ class HermesRuntimeAdapter:
 
         # The existing session subprocess may have already completed;
         # for a fresh one-shot execution, we run a new hermes process
-        cmd = [self.hermes_bin, "-z", "--worktree", "-w", context.workspace_path if context else "/workspaces/global"]
+        cmd = [self.hermes_bin, "chat", "-q", (context.task_prompt if hasattr(context, 'task_prompt') else "Create Python program"), "--in", context.workspace_path, "-Q"]
 
         try:
             start = datetime.utcnow()

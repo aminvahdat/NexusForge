@@ -4,16 +4,31 @@ from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool
 from alembic import context
 
-# Alembic Config object
+# Alembic Config object - critical to place BEFORE any other imports
 config = context.config
 
 # Set up logging
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Import models for autogenerate
-from app.models import Base
+# Set DB URL from environment - must happen BEFORE model imports
+import os
+
+if "DATABASE_URL" in os.environ:
+    config.set_main_option("sqlalchemy.url", os.environ["DATABASE_URL"])
+
+# Import Base directly from models.base - this avoids the app/__init__.py chain
+# that would trigger main.py and settings.get_settings()
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from app.models.base import Base
 target_metadata = Base.metadata
+
+# Import all models
+from app.models import User, Project, Task, UserAPIKey, UserMemory, Notification, ApprovalRequest, Artifact, Worker, ProjectMemory, SystemMemory, WorkerLog
 
 def run_migrations_offline():
     """Run migrations in 'offline' mode."""
