@@ -1,55 +1,11 @@
 import React, { useState, useEffect } from "react";
-import { Project, ProjectCreate, TaskStatus, AgentRole, Priority } from "../types";
+import { Link, useNavigate } from "react-router-dom";
+import { Project, ProjectCreate } from "../types";
 import { projectApi } from "../services/api";
-import Loading from "./Loading";
-import "./ProjectList.css";
+import Loading from "../components/Loading";
+import "./ProjectListPage.css";
 
-interface ProjectCardProps {
-  project: Project;
-  onClick: () => void;
-}
-
-const ProjectCard: React.FC<ProjectCardProps> = ({ project, onClick }) => {
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
-  };
-
-  return (
-    <article className="project-card" onClick={onClick} tabIndex={0} role="button" onKeyDown={(e) => e.key === "Enter" && onClick()}>
-      <header className="project-card__header">
-        <h3 className="project-card__name">{project.name}</h3>
-        <span className="project-card__status">{project.status}</span>
-      </header>
-      <p className="project-card__description">{project.description || "No description provided"}</p>
-      <footer className="project-card__footer">
-        <div className="project-card__meta">
-          <span className="project-card__meta-item">
-            <span className="project-card__meta-label">Created</span>
-            <span className="project-card__meta-value">{formatDate(project.created_at)}</span>
-          </span>
-          <span className="project-card__meta-item">
-            <span className="project-card__meta-label">Owner</span>
-            <span className="project-card__meta-value">{project.owner_id.slice(0, 8)}...</span>
-          </span>
-        </div>
-        <button className="project-card__action" onClick={(e) => { e.stopPropagation(); onClick(); }}>
-          Open Project
-        </button>
-      </footer>
-    </article>
-  );
-};
-
-interface ProjectListProps {
-  onProjectSelect?: (project: Project) => void;
-}
-
-const ProjectList: React.FC<ProjectListProps> = ({ onProjectSelect }) => {
+const ProjectListPage: React.FC = () => {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -59,7 +15,7 @@ const ProjectList: React.FC<ProjectListProps> = ({ onProjectSelect }) => {
   const [newProject, setNewProject] = useState<ProjectCreate>({
     name: "",
     description: "",
-    owner_id: "current-user", // Will come from auth context in Phase 3
+    owner_id: "current-user",
     ai_provider: null,
     ai_model: null,
     preferred_language: "en",
@@ -67,6 +23,8 @@ const ProjectList: React.FC<ProjectListProps> = ({ onProjectSelect }) => {
     telegram_notifications_enabled: false,
     telegram_chat_id: null,
   });
+
+  const navigate = useNavigate();
 
   const fetchProjects = async () => {
     try {
@@ -103,7 +61,7 @@ const ProjectList: React.FC<ProjectListProps> = ({ onProjectSelect }) => {
         telegram_notifications_enabled: false,
         telegram_chat_id: null,
       });
-      fetchProjects(); // Refresh list
+      fetchProjects();
     } catch (err: any) {
       setCreateError(err.detail || "Failed to create project");
     } finally {
@@ -115,14 +73,28 @@ const ProjectList: React.FC<ProjectListProps> = ({ onProjectSelect }) => {
     setNewProject((prev) => ({ ...prev, [field]: value }));
   };
 
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  };
+
   if (loading) {
     return <Loading message="Loading projects..." />;
   }
 
   return (
-    <div className="project-list">
-      <header className="project-list__header">
-        <h1 className="project-list__title">Projects</h1>
+    <div className="page page--projects">
+      <header className="page__header">
+        <div className="page__title-section">
+          <h1 className="page__title">Projects</h1>
+          <p className="page__subtitle">
+            Manage your AI development projects
+          </p>
+        </div>
         <button className="btn btn-primary" onClick={() => setShowCreateModal(true)}>
           <svg className="btn__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <line x1="12" y1="5" x2="12" y2="19"></line>
@@ -152,12 +124,12 @@ const ProjectList: React.FC<ProjectListProps> = ({ onProjectSelect }) => {
       {projects.length === 0 && !error && (
         <div className="empty-state">
           <svg className="empty-state__icon" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <path d="M21 19V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2z"></path>
-            <line x1="9" y1="9" x2="15" y2="15"></line>
-            <line x1="15" y1="9" x2="9" y2="15"></line>
+            <path d="M22 19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l2 3h9a2 2 0 0 1 2 2v11z"></path>
           </svg>
           <h2 className="empty-state__title">No Projects Yet</h2>
-          <p className="empty-state__description">Create your first project to start building with NexusForge.</p>
+          <p className="empty-state__description">
+            Create your first project to start building with NexusForge.
+          </p>
           <button className="btn btn-primary empty-state__action" onClick={() => setShowCreateModal(true)}>
             Create Project
           </button>
@@ -165,13 +137,35 @@ const ProjectList: React.FC<ProjectListProps> = ({ onProjectSelect }) => {
       )}
 
       {projects.length > 0 && (
-        <div className="project-list__grid" role="list">
+        <div className="page__grid" role="list">
           {projects.map((project) => (
-            <ProjectCard
+            <article
               key={project.id}
-              project={project}
-              onClick={() => onProjectSelect?.(project)}
-            />
+              className="page__card"
+              onClick={() => navigate(`/projects/${project.id}`)}
+              tabIndex={0}
+              role="listitem"
+            >
+              <header className="page__card-header">
+                <h3 className="page__card-name">{project.name}</h3>
+                <span className="page__card-status">{project.status}</span>
+              </header>
+              <p className="page__card-description">
+                {project.description || "No description provided"}
+              </p>
+              <footer className="page__card-footer">
+                <div className="page__card-meta">
+                  <span className="page__card-meta-item">
+                    <span className="page__card-meta-label">Created</span>
+                    <span className="page__card-meta-value">{formatDate(project.created_at)}</span>
+                  </span>
+                  <span className="page__card-meta-item">
+                    <span className="page__card-meta-label">Owner</span>
+                    <span className="page__card-meta-value">{project.owner_id.slice(0, 8)}...</span>
+                  </span>
+                </div>
+              </footer>
+            </article>
           ))}
         </div>
       )}
@@ -288,4 +282,4 @@ const ProjectList: React.FC<ProjectListProps> = ({ onProjectSelect }) => {
   );
 };
 
-export default ProjectList;
+export default ProjectListPage;

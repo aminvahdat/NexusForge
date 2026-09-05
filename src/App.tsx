@@ -1,35 +1,54 @@
-import React, { useState } from "react";
-import ProjectList from "./components/ProjectList";
-import Loading from "./components/Loading";
+import React, { useState, useEffect } from "react";
+import { BrowserRouter as Router, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import axios from "axios";
 import "./App.css";
 
-const App: React.FC = () => {
-  const [showLoading, setShowLoading] = useState(true);
+import ProjectList from "./pages/ProjectList";
+import ProjectDetail from "./pages/ProjectDetail";
+import TaskList from "./pages/TaskList";
+import TaskDetail from "./pages/TaskDetail";
+import Dashboard from "./pages/Dashboard";
+import Navigation from "./components/Navigation";
+
+const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
+
+function App() {
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  // Check backend availability on app load
+  useEffect(() => {
+    const checkBackend = async () => {
+      try {
+        const res = await axios.get(`${API_BASE}/api/health`, { timeout: 5000 });
+        console.log("Backend health check:", res.data.status);
+      } catch (err) {
+        console.warn("Backend unreachable:", err.message);
+      }
+    };
+    checkBackend();
+  }, [API_BASE]);
+
+  // Check auth token - this is a placeholder for Phase 3 auth integration
+  const [authToken, setAuthToken] = useState<string | null>(null);
 
   return (
-    <div className="min-h-screen bg-gray-50 text-gray-800">
-      <header className="bg-white shadow-sm py-4">
-        <div className="container mx-auto px-4">
-          <h1 className="text-3xl font-bold text-gray-800">NexusForge — Autonomous Software Development</h1>
-          <p className="text-gray-600">Build AI-powered tools, automate workflows, and create smart solutions</p>
-        </div>
-      </header>
+    <Router>
+      <div className="app">
+        <Navigation />
 
-      <main className="container mx-auto px-4 py-8">
-        {showLoading ? (
-          <Loading message="Initializing NexusForge..." />
-        ) : (
-          <ProjectList />
-        )}
-      </main>
-
-      <footer className="bg-white py-8">
-        <div className="container mx-auto px-4">
-          <p className="text-gray-600 text-center">© 2026 NexusForge. All rights reserved.</p>
-        </div>
-      </footer>
-    </div>
+        <main className="app__main">
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/projects" element={<ProjectList />} />
+            <Route path="/projects/:projectId" element={<ProjectDetail />} />
+            <Route path="/tasks/:projectId" element={<TaskList />} />
+            <Route path="/projects/:projectId/tasks/:taskId" element={<TaskDetail />} />
+          </Routes>
+        </main>
+      </div>
+    </Router>
   );
-};
+}
 
 export default App;

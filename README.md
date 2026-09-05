@@ -1,162 +1,230 @@
-# NexusForge — Multi-Agent Orchestration Platform
+# NexusForge — Autonomous Software Development Platform
 
-A self-hosted platform for autonomous software development with multi-agent orchestration, built on FastAPI, PostgreSQL, Redis, and Hermes Agent.
+## Overview
+NexusForge is a self-hosted, multi-agent orchestration platform for autonomous software development. It provides a premium, modern UI for managing projects and tasks with real backend integration.
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        NexusForge System                            │
-├─────────────────────────────────────────────────────────────────────┤
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐         │
-│  │   Frontend   │───▶│    API       │───▶│  PostgreSQL  │         │
-│  │  (React/TS)  │    │  (FastAPI)   │    │   (15+)      │         │
-│  └──────────────┘    └──────┬───────┘    └──────────────┘         │
-│                             │                                       │
-│                    ┌────────▼────────┐                              │
-│                    │     Redis       │                              │
-│                    │    (7+)         │                              │
-│                    └─────────────────┘                              │
-└─────────────────────────────────────────────────────────────────────┘
-```
+### Backend
+- **Framework**: FastAPI (Python 3.11)
+- **Database**: PostgreSQL 15 with asyncpg
+- **Cache/Queue**: Redis 7-alpine
+- **Migrations**: Alembic (12 tables)
+- **Architecture**: Agent Runtime Interface + HermesAdapter
+
+### Frontend
+- **Framework**: React 18 + TypeScript 5
+- **Build Tool**: Vite
+- **Styling**: Custom CSS with design system tokens
+- **Routing**: React Router v6
+- **HTTP Client**: Axios (centralized API client)
+- **UI/UX**: AI-Native design system (ui-ux-pro-max)
+
+### Infrastructure
+- **Containerization**: Docker Compose
+- **Services**: postgres:15-alpine, redis:7-alpine, backend, worker, migrations, frontend
+- **Network**: nexusforge-network (bridge)
+- **Volumes**: postgres_data, redis_data
 
 ## Quick Start
 
 ### Prerequisites
-- Docker & Docker Compose
-- `.env` file with required secrets (see `.env.example`)
+- Ubuntu 20.04 LTS or later
+- Docker v20.10+
+- Docker Compose v2 (or v1)
+- Git
 
-### Development Stack
-
+### Setup
 ```bash
-# 1. Copy environment template and fill in secrets
+# Clone the repository
+git clone https://github.com/yellowdeerco/nexusforge.git
+cd nexusforge
+
+# Copy environment template
 cp .env.example .env
-# Edit .env with your actual values
+# Edit .env to set your secrets
 
-# 2. Start infrastructure (PostgreSQL, Redis)
-docker-compose up -d postgres redis
+# Start all services
+docker compose up -d
 
-# 3. Verify services are healthy
-docker-compose ps
-# Both postgres and redis should show "healthy"
+# Check service status
+docker compose ps
 
-# 4. Run database migrations
-docker-compose run --rm backend alembic upgrade head
+# View backend logs
+docker compose logs backend
 
-# 5. Start backend API
-docker-compose up -d backend
-
-# 6. Verify API health
-curl http://localhost:8000/health
-# Expected: {"status": "ok", "checks": {"database": true, "redis": true}}
-
-# 7. Start frontend (optional)
-docker-compose up -d frontend
+# Run migrations (automatic via docker-compose)
+docker compose exec migrations alembic -c /app/app/alembic.ini upgrade head
 ```
 
-### Environment Variables
+### Access the Application
+- **Backend API**: http://localhost:8000
+- **API Documentation**: http://localhost:8000/docs (when debug mode)
+- **Frontend**: http://localhost:3000
+- **Worker Dashboard**: http://localhost:8000/workers
 
-Required in `.env`:
-- `POSTGRES_PASSWORD` — PostgreSQL password
-- `REDIS_PASSWORD` — Redis password
-- `SECRET_KEY` — Application secret (32+ chars)
-- `JWT_SECRET_KEY` — JWT signing key (32+ chars)
-- `ENCRYPTION_KEY` — Fernet encryption key for API keys (32 bytes base64)
-
-Optional:
-- `MAX_CONCURRENT_WORKERS=2` — Worker pool size
-- `AI_PROVIDER=openrouter` — AI provider (future use)
-- `ALLOWED_ORIGINS=http://localhost:3000` — CORS whitelist
-
-## Authentication
-
-All API endpoints except `/health`, `/readiness`, `/auth/register`, `/auth/login` require authentication.
-
-### Login
+### Verify Setup
 ```bash
-curl -X POST http://localhost:8000/auth/login \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "username=your_email@example.com&password=yourpassword"
+# Check all services are running
+docker compose ps
+
+# Test backend health
+curl http://localhost:8000/api/health
+
+# Test database connection
+docker compose exec postgres psql -U nexusforge -d nexusforge -c "SELECT 1;"
+
+# Test Redis connection
+docker compose exec redis redis-cli ping
 ```
-
-Response:
-```json
-{
-  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "token_type": "bearer"
-}
-```
-
-### Using the Token
-```bash
-curl -H "Authorization: Bearer <access_token>" http://localhost:8000/api/projects
-```
-
-## API Endpoints
-
-### Public
-- `GET /` — Root info
-- `GET /health` — System health check
-- `GET /readiness` — DB + Redis liveness
-- `POST /auth/register` — Register user
-- `POST /auth/login` — Login and get JWT
-
-### Protected (require `Authorization: Bearer <token>`)
-- `GET /auth/me` — Current user
-- `POST /api/projects` — Create project
-- `GET /api/projects/{id}` — Get project
-- `POST /api/projects/{id}/tasks` — Create task
-- `GET /api/projects/{id}/tasks` — List tasks
-- `GET /api/tasks/{id}` — Get task
-- `PUT /api/tasks/{id}` — Update task
-- `GET /api/workers/status` — Worker pool status
 
 ## Project Structure
 
 ```
-NexusForge/
-├── backend/
+nexusforge/
+├── backend/             # FastAPI backend application
 │   ├── app/
-│   │   ├── api/          # API routes (health, auth, projects, tasks)
-│   │   ├── auth/         # JWT authentication
-│   │   ├── authorization.py  # RBAC
-│   │   ├── config/       # Settings management
-│   │   ├── db/           # Database connection
-│   │   ├── models/       # SQLAlchemy models
-│   │   ├── migrations/   # Alembic migrations
-│   │   ├── schemas/      # Pydantic schemas
-│   │   ├── services/     # DB, Redis services
-│   │   └── main.py       # FastAPI app
-│   ├── Dockerfile
-│   └── requirements.txt
-├── frontend/             # React/TypeScript (Phase 4+)
-├── docker-compose.yml
-├── .env.example
-└── docs/
-    ├── ARCHITECTURE.md
-    ├── AUTHENTICATION.md
-    ├── AUTHORIZATION.md
-    ├── SECURITY_ARCHITECTURE.md
-    └── IMPLEMENTATION_PLAN.md
+│   │   ├── api/         # API endpoints
+│   │   ├── models/      # SQLAlchemy models
+│   │   ├── schemas/     # Pydantic schemas
+│   │   ├── services/    # Business logic services
+│   │   ├── config/      # Application configuration
+│   │   └── core/        # Core application logic
+│   ├── alembic/         # Database migrations
+│   ├── alembic.ini      # Alembic configuration
+│   ├── Dockerfile       # Docker image for backend/worker/migrations
+│   └── worker.py        # Worker process
+├── frontend/            # React frontend application
+│   ├── src/
+│   │   ├── pages/       # Page-level components
+│   │   ├── components/  # Reusable components
+│   │   ├── services/    # API client modules
+│   │   ├── types/       # TypeScript type definitions
+│   │   └── App.tsx      # Main application
+│   ├── package.json     # Node.js dependencies
+│   └── vite.config.ts   # Vite configuration
+├── docker-compose.yml   # Multi-service Docker orchestration
+├── .env.example         # Environment variables template
+├── Dockerfile           # Docker image definition
+├── LICENSE              # MIT License
+├── README.md            # This file
+├── docs/                # Documentation
+│   ├── DEPLOYMENT.md    # Deployment guide
+│   ├── DATABASE.md      # Database schema documentation
+│   └── PHASE53_AUDIT.md # Phase 5.3 audit
+└── design-system/       # UI/UX design system
+    └── nexusforge/
+        └── MASTER.md    # Design system master document
 ```
+
+## API Endpoints
+
+### Health & Readiness
+- `GET /api/health` - Health check endpoint
+- `GET /api/health/readiness` - Readiness check with DB/Redis status
+- `GET /` - Root endpoint
+
+### Projects
+- `GET /api/projects` - List all projects
+- `GET /api/projects/:id` - Get project by ID
+- `POST /api/projects` - Create a new project
+
+### Tasks
+- `GET /api/projects/:id/tasks` - List tasks for a project
+- `GET /api/tasks/:id` - Get task by ID
+- `POST /api/projects/:id/tasks` - Create a task
+- `PUT /api/tasks/:id` - Update a task
+- `PUT /api/tasks/:id/status` - Update task status
+
+### Workers
+- `GET /api/workers/status` - Get worker pool status
+
+### Authentication (Phase 3+)
+- `POST /api/auth/login` - User login
+- `POST /api/auth/register` - User registration
+- `GET /api/auth/me` - Get current user
+
+## Configuration
+
+### Environment Variables
+All configuration is environment-driven. See `.env.example` for all available options.
+
+Key environment variables:
+- `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` - Database configuration
+- `DATABASE_URL` - Full database connection URL
+- `REDIS_URL` - Redis connection URL
+- `SECRET_KEY`, `JWT_SECRET_KEY` - Security keys
+- `MAX_CONCURRENT_WORKERS` - Worker pool size (default: 2)
+- `AI_PROVIDER`, `AI_MODEL` - Default AI provider/model
+- `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` - AI provider API keys
+
+### AI Provider Configuration
+NexusForge is provider-agnostic. Configure your preferred AI provider via environment variables:
+- `OPENAI_API_KEY` - OpenAI GPT models
+- `ANTHROPIC_API_KEY` - Anthropic Claude models
+- `AI_PROVIDER`, `AI_MODEL` - Provider and model selection
+
+## Development
+
+### Backend Development
+```bash
+# Run backend with hot reload
+cd backend
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+### Frontend Development
+```bash
+# Run frontend with hot reload
+cd frontend
+npm run dev
+```
+
+### Running Tests
+```bash
+# Backend tests
+cd backend
+pytest tests/
+
+# Frontend tests
+cd frontend
+npm run test
+```
+
+## Design System
+
+The UI follows the NexusForge design system defined in `design-system/nexusforge/MASTER.md`.
+
+Key design principles:
+- **AI-Native UI**: Chatbot, conversational, streaming text aesthetics
+- **Purple/Cyan palette**: Professional AI/tech brand identity
+- **Inter font**: Modern, developer-friendly typography
+- **Premium quality**: Minimal, sophisticated, luxurious feel
+- **Accessible**: WCAG AA compliant, keyboard navigable
 
 ## Security
 
-See `docs/SECURITY_ARCHITECTURE.md` for:
-- JWT token strategy
-- RBAC design
-- Secret handling rules
-- API security measures
-- Known limitations
+- All API endpoints are protected with environment-driven secrets
+- JWT authentication implemented in Phase 3
+- RBAC (Role-Based Access Control) available
+- Agent tool permissions (SAFE/LIMITED/PRIVILEGED/DANGEROUS)
+- Approval center for dangerous operations
+- No secrets in logs (structured logging with redaction)
 
-## Agent Architecture (Future)
+## Contributing
 
-- **Agent Roles** = Logical expertise profiles (Chief, Planner, Architect, etc.)
-- **Workers** = Reusable execution resources (configurable pool)
-- **Hermes Adapter** = Runtime implementation behind Agent Runtime abstraction
-
-See `docs/AGENT_ARCHITECTURE.md` and `docs/WORKER_ARCHITECTURE.md`.
+See `CONTRIBUTING.md` for contribution guidelines.
 
 ## License
 
-MIT — see `LICENSE` file.
+This project is licensed under the MIT License - see `LICENSE` for details.
+
+## Status
+
+Phase 5.3 complete — Real Project & Task Management UI implemented.
+Phase 5.4 pending — Live execution streaming, event timeline, artifact browser.
+
+---
+
+**NexusForge v0.1.0**
+Built with ❤️ by the NexusForge team.
