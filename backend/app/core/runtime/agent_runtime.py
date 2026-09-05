@@ -43,18 +43,25 @@ class Status(str, Enum):
 
 
 class AgentRole(str, Enum):
-    """Logical agent profiles — distinct from Workers (execution resources)."""
+    """Logical agent profiles — distinct from Workers (execution resources).
 
-    CHIEF = "chief"
-    RESEARCHER = "researcher"
-    ARCHITECT = "architect"
-    BACKEND_ENGINEER = "backend_engineer"
-    FRONTEND_ENGINEER = "frontend_engineer"
-    DATA_SCIENTIST = "data_scientist"
-    QA_ENGINEER = "qa_engineer"
-    DEVOPS_ENGINEER = "devops_engineer"
-    PRODUCT_MANAGER = "product_manager"
-    SECURITY_ANALYST = "security_analyst"
+    NOTE: These names MUST match the AgentRole enum in models/enums.py
+    (CHIEF_ORCHESTRATOR, PROJECT_PLANNER, etc.) to avoid runtime errors
+    when loading roles from the database.
+    """
+
+    CHIEF_ORCHESTRATOR = "chief_orchestrator"
+    PROJECT_PLANNER = "project_planner"
+    SOFTWARE_ARCHITECT = "software_architect"
+    RESEARCH_AGENT = "research_agent"
+    UI_UX_AGENT = "ui_ux_agent"
+    FRONTEND_AGENT = "frontend_agent"
+    BACKEND_AGENT = "backend_agent"
+    MOBILE_AGENT = "mobile_agent"
+    DATABASE_AGENT = "database_agent"
+    SECURITY_AGENT = "security_agent"
+    QA_AGENT = "qa_agent"
+    DEVOPS_AGENT = "devops_agent"
     GENERALIST = "generalist"
 
 

@@ -1,127 +1,100 @@
 #!/usr/bin/env python3
 """NexusForge Worker — Complete executable worker process (Phase 4E).
 
-This worker demonstrates all required capabilities:
-1. Connect to PostgreSQL (verified by SELECT 1)
-2. Connect to Redis (verified by PING)
-3. Register itself in Redis WORKER_STATE
-4. Send heartbeats (every 5 seconds)
-5. Claim/assign tasks from database
-6. Load task and Agent Role
-7. Construct ExecutionContext
-8. Create Hermes runtime session
-9. Execute Hermes task (timeout-safe, error-handled)
-10. Capture result and artifacts
-11. Update task state
-12. Handle failures and retries
-13. Support cancellation and shutdown
-14. Return to IDLE state
-
-Usage:
-    python3 backend/worker.py [--worker-id WKR_ID] [--hostname HOST_NAME]
-
-Environment (from docker-compose.yml):
-    DATABASE_URL=postgresql://postgres:***@postgres:5432/nexusforge
-    REDIS_URL=redis://redis:6379/0
-    MAX_CONCURRENT_WORKERS=2 (default)
-    JWT_SECRET_KEY, SECRET_KEY, ENCRYPTION_KEY (security)
-
-Security Boundary:
-    - Workspace isolation (validate under /workspaces/)
-    - Path traversal protection (Path.relative_to check)
-    - No container/chroot isolation (Python path check only)
-    - No secrets in Hermes prompt (filtered)
-    - No approval mechanism enforced (design)
-
-This is a complete minimal worker executable that demonstrates actual implementation.
+Full lifecycle: connect, register, heartbeat, claim, load role,
+create workspace, invoke Hermes, capture result, persist events,
+collect artifacts, update task, return to idle.
 """
 
 import asyncio
 import argparse
+import logging
 import os
 import signal
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Add backend to path for consistent imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, text
-
 import structlog
+from sqlalchemy import text
 
 from app.config.settings import get_settings
-from app.db import get_db_session
-from app.models.enums import AgentRole, TaskStatus
+from app.models.enums import AgentRole as DBAgentRole, TaskStatus
+from app.db import get_engine, get_session_factory
 from app.services.redis import get_redis
-from app.services.worker import WorkerPool
 from app.core.runtime.agent_runtime import HermesRuntimeAdapter, ExecutionContext, Status
 
+# Configure structlog (sync)
+structlog.configure(
+    processors=[
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.JSONRenderer()
+    ],
+    wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
+    context_class=dict,
+    logger_factory=structlog.PrintLoggerFactory(),
+)
 logger = structlog.get_logger()
 
 
 class WorkerProcess:
-    """Executable worker process implementing full worker lifecycle."""
-
     def __init__(self, worker_id: str = None, hostname: str = None):
         self.worker_id = worker_id or f"wkr-{os.getpid()}"
         self.hostname = hostname or os.uname().nodename
         self.adapter: HermesRuntimeAdapter = None
-        self.pool: WorkerPool = None
         self.running = False
         self.heartbeat_task = None
+        self._engine = None
+        self._session_factory = None
+
+    async def _get_engine(self):
+        if self._engine is None:
+            self._engine = get_engine()
+        return self._engine
+
+    async def _get_session_factory(self):
+        if self._session_factory is None:
+            self._session_factory = get_session_factory()
+        return self._session_factory
 
     async def connect(self) -> None:
-        """Connect to PostgreSQL and Redis databases."""
-        logger.info("worker.connecting", worker_id=self.worker_id)
+        """Connect to PostgreSQL and Redis."""
+        logger.info("worker_connecting", worker_id=self.worker_id)
 
-        # Test PostgreSQL connectivity
+        # PostgreSQL: test connection by getting a session and running SELECT 1
         try:
-            settings = get_settings()
-            db_url = getattr(settings, 'database_url', None)
-            if db_url:
-                from sqlalchemy import create_engine
-                engine = create_engine(str(db_url), future=True, pool_pre_ping=True)
-                with engine.connect() as conn:
-                    result = conn.execute(text("SELECT 1"))
-                    await logger.info("db_connect_success", worker_id=self.worker_id)
-            else:
-                raise RuntimeError("DATABASE_URL not set")
+            engine = await self._get_engine()
+            async with self._engine.connect() as conn:
+                result = await conn.execute(text("SELECT 1 AS result"))
+                row = result.scalar()
+                if row == 1:
+                    logger.info("db_connect_success", worker_id=self.worker_id)
+                else:
+                    raise RuntimeError(f"Unexpected SELECT 1 result: {row}")
         except Exception as exc:
-            await logger.error("db_connect_failed", worker_id=self.worker_id, error=str(exc))
+            logger.error("db_connect_failed", worker_id=self.worker_id, error=str(exc))
             raise RuntimeError(f"Database connection failed: {exc}") from exc
 
-        # Test Redis connectivity
+        # Redis
         try:
             redis = await get_redis()
             ping = await redis.ping()
-            await logger.info("redis_connect_success", worker_id=self.worker_id, ping=ping)
+            logger.info("redis_connect_success", worker_id=self.worker_id, ping=ping)
         except Exception as exc:
-            await logger.error("redis_connect_failed", worker_id=self.worker_id, error=str(exc))
+            logger.error("redis_connect_failed", worker_id=self.worker_id, error=str(exc))
             raise RuntimeError(f"Redis connection failed: {exc}") from exc
 
     async def register(self) -> None:
-        """Register worker with Redis state and pool."""
-        await logger.info("worker_registering", worker_id=self.worker_id, hostname=self.hostname)
-
+        """Register worker with Redis state."""
+        logger.info("worker_registering", worker_id=self.worker_id, hostname=self.hostname)
         try:
             redis = await get_redis()
             await redis.hset("WORKER_STATE", self.worker_id, "idle")
-            await logger.info("worker_registered_redis", worker_id=self.worker_id)
+            logger.info("worker_registered_redis", worker_id=self.worker_id)
         except Exception as exc:
-            await logger.error("worker_register_redis_failed", error=str(exc))
-
-        # Register with WorkerPool
-        try:
-            settings = get_settings()
-            max_workers = getattr(settings, 'max_concurrent_workers', 2)
-            self.pool = WorkerPool()
-            self.pool.set_pool_size(max_workers)
-            await logger.info("worker_pool_created", worker_id=self.worker_id, pool_size=max_workers)
-        except Exception as exc:
-            await logger.error("worker_pool_create_failed", error=str(exc))
+            logger.error("worker_register_redis_failed", worker_id=self.worker_id, error=str(exc))
 
     async def heartbeat(self) -> None:
         """Send periodic heartbeat to Redis (every 5 seconds)."""
@@ -130,47 +103,70 @@ class WorkerProcess:
                 redis = await get_redis()
                 await redis.hset("WORKER_STATE", self.worker_id, "idle")
                 await redis.expire("WORKER_STATE", 30)
-                await logger.info("worker_heartbeat", worker_id=self.worker_id, status="idle")
+                logger.info("worker_heartbeat", worker_id=self.worker_id, status="idle")
             except Exception as exc:
-                await logger.error("heartbeat_failed", error=str(exc))
+                logger.error("heartbeat_failed", worker_id=self.worker_id, error=str(exc))
             await asyncio.sleep(5)
 
-    async def claim_task(self, db_session: AsyncSession):
-        """Claim an assigned task for execution."""
+    async def claim_task(self) -> bool:
+        """Claim an assigned task from DB and execute it."""
         try:
-            from app.models.task import Task
-            query = select(Task).where(
-                Task.status == TaskStatus.ASSIGNED,
-                Task.assigned_worker == self.worker_id
-            ).limit(1)
-            result = await db_session.execute(query)
-            task = result.scalar_one_or_none()
+            session_factory = await self._get_session_factory()
+            async with session_factory() as session:
+                # Find queued task not yet assigned
+                from sqlalchemy import select
+                from app.models import Task
+                from app.models.enums import TaskStatus as DBTaskStatus
 
-            if task:
+                result = await session.execute(
+                    select(Task).where(Task.status == DBTaskStatus.QUEUED.value).limit(1)
+                )
+                task = result.scalar_one_or_none()
+
+                if not task:
+                    logger.info("no_queued_task", worker_id=self.worker_id)
+                    return False
+
+                # Claim it
                 task.status = TaskStatus.RUNNING
-                await db_session.commit()
-                await logger.info("task_claimed_and_started", task_id=str(task.id), worker_id=self.worker_id)
-                return task
-            else:
-                await logger.info("no_assigned_task", worker_id=self.worker_id)
-                return None
+                task.assigned_worker = self.worker_id
+                task.started_at = datetime.now(timezone.utc)
+                await session.commit()
+                logger.info("task_claimed", task_id=str(task.id), worker_id=self.worker_id)
+
+                # Execute
+                await self.execute_task(session, task)
+                return True
+
         except Exception as exc:
-            await logger.error("claim_task_failed", error=str(exc))
-            return None
+            logger.error("claim_task_failed", worker_id=self.worker_id, error=str(exc))
+            return False
 
-    async def execute_task(self, task) -> bool:
-        """Execute the claimed task via Hermes runtime."""
+    async def execute_task(self, session, task) -> None:
+        """Execute task via Hermes runtime."""
         try:
-            # Load appropriate Agent Role based on task
-            role = self.load_role_for_task(task)
+            # Load role (map DB role name to adapter role)
+            role = self._map_role(task.role or "generalist")
 
-            # Initialize adapter if needed
+            # Adapter (Hermes binary check)
             if self.adapter is None:
                 self.adapter = HermesRuntimeAdapter(timeout=180)
-                self.adapter.initialize()
+                try:
+                    self.adapter.initialize()
+                    logger.info("hermes_initialized", worker_id=self.worker_id)
+                except RuntimeError as exc:
+                    logger.error("hermes_init_failed", worker_id=self.worker_id, error=str(exc), _run_fallback=True)
+                    task.status = TaskStatus.FAILED
+                    task.error_message = f"Hermes init failed: {exc}"
+                    task.completed_at = datetime.now(timezone.utc)
+                    await session.commit()
+                    return
 
-            # Create execution context
+            # Workspace
             workspace = f"/workspaces/{task.project_id or 'global'}"
+            Path(workspace).mkdir(parents=True, exist_ok=True)
+
+            # Execution context
             context = ExecutionContext(
                 project_id=str(task.project_id) if task.project_id else None,
                 task_id=str(task.id),
@@ -181,14 +177,13 @@ class WorkerProcess:
                 max_execution_time=180,
             )
 
-            # Create Hermes session
+            # Hermes session + execution
             session_id = self.adapter.create_session(context)
-            await logger.info("hermes_session_created", session_id=session_id, worker_id=self.worker_id)
+            logger.info("hermes_session_created", session_id=session_id, worker_id=self.worker_id)
 
-            # Execute Hermes task
             result = self.adapter.execute_task(session_id, context)
 
-            # Update task based on execution result
+            # Update task
             task.status = TaskStatus.COMPLETED if result.status == Status.COMPLETED else TaskStatus.FAILED
             task.completed_at = datetime.now(timezone.utc)
             task.execution_result = result.output
@@ -196,69 +191,66 @@ class WorkerProcess:
             task.duration_seconds = result.execution_duration_sec
             task.error_message = result.error if result.status == Status.FAILED else None
 
-            await logger.info(
-                "task_execution_completed",
+            await session.commit()
+            logger.info(
+                "task_execution_done",
                 task_id=str(task.id),
                 status=task.status.value,
                 duration=result.execution_duration_sec,
             )
 
-            # Clean up session
             self.adapter.terminate(session_id)
-            return True
 
         except Exception as exc:
-            await logger.error("task_execution_failed", task_id=str(task.id), error=str(exc))
-            return False
+            logger.error("task_execution_failed", task_id=str(task.id), error=str(exc))
+            task.status = TaskStatus.FAILED
+            task.error_message = str(exc)
+            task.completed_at = datetime.now(timezone.utc)
+            await session.commit()
 
-    def load_role_for_task(self, task) -> AgentRole:
-        """Determine AgentRole for task execution."""
-        # Basic role assignment logic
-        if task.role:
-            try:
-                return AgentRole(task.role)
-            except ValueError:
-                pass
-        # Default role based on task type/content
-        if hasattr(task, 'task_type'):
-            if 'backend' in task.task_type.lower():
-                return AgentRole.BACKEND_ENGINEER
-            elif 'frontend' in task.task_type.lower():
-                return AgentRole.FRONTEND_ENGINEER
-            elif 'data' in task.task_type.lower():
-                return AgentRole.DATA_SCIENTIST
-        return AgentRole.GENERALIST
+    def _map_role(self, role_str: str) -> DBAgentRole:
+        """Map DB role name to adapter AgentRole (hardcoded in agent_runtime)."""
+        mapping = {
+            "chief_orchestrator": DBAgentRole.CHIEF_ORCHESTRATOR,
+            "project_planner": DBAgentRole.PROJECT_PLANNER,
+            "software_architect": DBAgentRole.SOFTWARE_ARCHITECT,
+            "research_agent": DBAgentRole.RESEARCH_AGENT,
+            "ui_ux_agent": DBAgentRole.UI_UX_AGENT,
+            "frontend_agent": DBAgentRole.FRONTEND_AGENT,
+            "backend_agent": DBAgentRole.BACKEND_AGENT,
+            "mobile_agent": DBAgentRole.MOBILE_AGENT,
+            "database_agent": DBAgentRole.DATABASE_AGENT,
+            "security_agent": DBAgentRole.SECURITY_AGENT,
+            "qa_agent": DBAgentRole.QA_AGENT,
+            "devops_agent": DBAgentRole.DEVOPS_AGENT,
+            "chief": DBAgentRole.CHIEF_ORCHESTRATOR,
+            "researcher": DBAgentRole.RESEARCH_AGENT,
+            "architect": DBAgentRole.SOFTWARE_ARCHITECT,
+            "backend_engineer": DBAgentRole.BACKEND_AGENT,
+            "frontend_engineer": DBAgentRole.FRONTEND_AGENT,
+            "generalist": DBAgentRole.CHIEF_ORCHESTRATOR,
+        }
+        lower = role_str.lower()
+        return mapping.get(lower, DBAgentRole.CHIEF_ORCHESTRATOR)
 
     async def run_loop(self) -> None:
-        """Main worker loop: connect, register, heartbeat, execute tasks."""
+        """Main worker loop."""
         try:
             await self.connect()
             await self.register()
 
-            # Start heartbeat
             self.heartbeat_task = asyncio.create_task(self.heartbeat())
-            await logger.info("worker_started", worker_id=self.worker_id, hostname=self.hostname)
+            logger.info("worker_started", worker_id=self.worker_id, hostname=self.hostname)
 
             while self.running:
-                try:
-                    # Create new DB session for each iteration
-                    async for db_session in get_db_session():
-                        task = await self.claim_task(db_session)
-                        if task:
-                            await self.execute_task(task)
-                            await db_session.commit()
-                            break  # Process one task per loop
-                        else:
-                            await asyncio.sleep(2)
-                    break  # Exit session loop
-                except Exception as exc:
-                    await logger.error("worker_loop_error", error=str(exc))
+                claimed = await self.claim_task()
+                if not claimed:
                     await asyncio.sleep(2)
 
         except asyncio.CancelledError:
-            await logger.info("worker_cancelled", worker_id=self.worker_id)
+            logger.info("worker_cancelled", worker_id=self.worker_id)
         except Exception as exc:
-            await logger.error("worker_fatal_error", error=str(exc))
+            logger.error("worker_fatal_error", worker_id=self.worker_id, error=str(exc))
         finally:
             self.running = False
             if self.heartbeat_task:
@@ -267,38 +259,46 @@ class WorkerProcess:
                     await self.heartbeat_task
                 except asyncio.CancelledError:
                     pass
-            await logger.info("worker_shutdown", worker_id=self.worker_id)
+            # Cleanup engines
+            if self._engine:
+                # Note: we don't have a direct way to dispose the engine from get_engine() without globals
+                # For simplicity, we rely on process exit to cleanup.
+                pass
+            logger.info("worker_shutdown", worker_id=self.worker_id)
 
     async def stop(self) -> None:
         """Stop worker gracefully."""
-        await logger.info("worker_stop_requested", worker_id=self.worker_id)
+        logger.info("worker_stop_requested", worker_id=self.worker_id)
         self.running = False
 
 
 def main() -> None:
-    """Worker entrypoint."""
-    parser = argparse.ArgumentParser(description="NexusForge Worker Process")
-    parser.add_argument("--worker-id", help="Worker ID (default: wkr-<pid>)")
-    parser.add_argument("--hostname", help="Hostname for worker registration")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--worker-id")
+    parser.add_argument("--hostname")
     args = parser.parse_args()
 
     worker = WorkerProcess(worker_id=args.worker_id, hostname=args.hostname)
     worker.running = True
 
-    # Setup signal handlers
-    def signal_handler(signum, frame):
-        asyncio.create_task(worker.stop())
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
 
-    signal.signal(signal.SIGTERM, signal_handler)
-    signal.signal(signal.SIGINT, signal_handler)
+    def shutdown(signum, frame):
+        loop.create_task(worker.stop())
+
+    signal.signal(signal.SIGTERM, shutdown)
+    signal.signal(signal.SIGINT, shutdown)
 
     try:
-        asyncio.run(worker.run_loop())
+        loop.run_until_complete(worker.run_loop())
     except KeyboardInterrupt:
         logger.info("worker_keyboard_interrupt", worker_id=worker.worker_id)
     except Exception as exc:
         logger.error("worker_fatal_error", error=str(exc))
         sys.exit(1)
+    finally:
+        loop.close()
 
 
 if __name__ == "__main__":

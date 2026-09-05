@@ -36,7 +36,7 @@ class User(Base):
     api_keys = relationship('UserAPIKey', back_populates='user')
     memory = relationship('UserMemory', back_populates='user', uselist=False)
     notifications = relationship('Notification', back_populates='user')
-    approval_requests = relationship('ApprovalRequest', back_populates='requested_by_user')
+    approval_requests = relationship('ApprovalRequest', foreign_keys='ApprovalRequest.requested_by_user_id', back_populates='requested_by_user')
 
     __table_args__ = (
         Index('ix_users_email_lower', func.lower(email)),
@@ -451,7 +451,7 @@ class ApprovalRequest(Base):
     outcome = Column(String(255), nullable=True)
 
     task = relationship('Task')
-    requested_by_user = relationship('User', foreign_keys=[requested_by_user_id], back_populates='approval_requests')
+    requested_by_user = relationship('User', foreign_keys=[requested_by_user_id])
     approved_by_user = relationship('User', foreign_keys=[approved_by_user_id])
 
     def to_dict(self) -> dict:
