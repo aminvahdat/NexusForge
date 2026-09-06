@@ -81,6 +81,8 @@ def create_app() -> FastAPI:
 
     # Execution and real-time monitoring endpoints
     app.include_router(execution_router, prefix="/execution", tags=["execution", "realtime"])
+    # Approval Center (Phase 5.6)
+    app.include_router(approval_router, prefix="/approvals", tags=["approval", "security"])
 
     @app.get("/", tags=["root"])
     async def root():

@@ -1,203 +1,105 @@
-import React, { useState, useEffect } from "react";
+import React from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
-import { Worker, ExecutionEvent } from "../types";
-import { api } from "../services/api";
-import { Skeleton } from "../components/Skeleton";
-import { Toast } from "../components/Toast";
-import { ExecutionTimeline } from "../components/ExecutionTimeline";
-import "./WorkerDetail.css";
+import { Worker } from "../types";
+import { Skeleton } from "./Skeleton";
+import { Loading } from "./Loading";
+import { EmptyState } from "./EmptyState";
 
-/* Worker detail page — individual worker health, metrics, and execution history */
 export const WorkerDetail: React.FC = () => {
-  const { id } = useParams<{ id: string }>();
+  const { id } = useParams();
   const navigate = useNavigate();
-  const [worker, setWorker] = useState<Worker | null>(null);
-  const [events, setEvents] = useState<ExecutionEvent[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [wsConnected, setWsConnected] = useState(false);
-  const [toast, setToast] = useState<{
-    type: "success" | "error" | "info";
-    title: string;
-    message: string;
-  } | null>(null);
+  const [worker, setWorker] = useState<any>(null);
+  const [isLoading, setLoading] = useState(true);
 
-  // Load worker data
   useEffect(() => {
-    if (!id) return;
-
-    const loadWorker = async () => {
+    async function loadWorker() {
       try {
-        setLoading(true);
-        const response = await fetch(`/api/workers/${id}`);
-        if (response.ok) {
-          const data = await response.json();
-          setWorker(data);
-        } else {
-          setToast({
-            type: "error",
-            title: "Worker Not Found",
-            message: `Worker ${id} could not be found.`,
-          });
-          setTimeout(() => navigate("/workers"), 3000);
-        }
+        const response = await api.workers.getById(id);
+        setWorker(response.data);
+        setLoading(false);
       } catch (error) {
         console.error("Failed to load worker:", error);
-        setToast({
-          type: "error",
-          title: "Load Error",
-          message: "Failed to load worker details. Please try again.",
-        });
-      } finally {
         setLoading(false);
       }
     };
 
     loadWorker();
-  }, [id, navigate]);
-
-  // WebSocket for real-time worker updates
-  useEffect(() => {
-    if (!id) return;
-
-    const clientId = "worker-detail-" + Date.now();
-    const ws = new WebSocket(
-      `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/execution/ws/${clientId}`
-    );
-
-    ws.onopen = () => setWsConnected(true);
-    ws.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data);
-        if (message.type === "worker_heartbeat" && message.data) {
-          const updated = message.data as Worker;
-          if (updated.id === id) {
-            setWorker(updated);
-          }
-        } else if (message.type === "execution_event" && message.data) {
-          const newEvent = message.data as ExecutionEvent;
-          if (newEvent.worker_id === id) {
-            setEvents((prev) => {
-              const exists = prev.some(
-                (e) =>
-                  e.event_type === newEvent.event_type &&
-                  e.timestamp === newEvent.timestamp
-              );
-              if (exists) return prev;
-              return [newEvent, ...prev].slice(0, 50);
-            });
-          }
-        }
-      } catch {
-        // Ignore parse errors
-      }
-    };
-    ws.onerror = () => setWsConnected(false);
-    ws.onclose = () => setWsConnected(false);
-    return () => ws.close();
   }, [id]);
 
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="worker-detail">
-        <Skeleton width="100%" height="200px" />
-        <Skeleton width="100%" height="150px" />
-      </div>
-    );
-  }
-
-  if (!worker) {
-    return (
-      <div className="worker-detail">
-        <div className="empty-state">
-          <h3 className="empty-state__title">Worker Not Found</h3>
-          <p className="empty-state__description">
-            The requested worker could not be found.
-          </p>
-          <Link to="/workers" className="btn btn-primary btn-sm">
-            Back to Workers
-          </Link>
+        <div className="worker-detail__loading">
+          <Skeleton />
+          <p>Loading worker information...</p>
         </div>
       </div>
     );
-  }
 
-  return (
-    <div className="worker-detail">
-      <header className="worker-detail__header">
-        <div>
-          <Link to="/workers" className="worker-detail__back">
-            ← Back to Workers
+    if (!worker) {
+      return (
+        <div className="worker-detail">
+          <div className="worker-detail__empty">
+            <EmptyState title="Worker Not Found" description="Could not find the requested worker." />
+          </div>
+        </div>
+      );
+
+    return (
+      <div className="worker-detail">
+        <div className="worker-detail-header">
+          <h1>Worker {worker.worker_id}</h1>
+          <Link to="/workers" className="back-button">
+            ← Workers
           </Link>
-          <h1 className="worker-detail__title">Worker {worker.id}</h1>
         </div>
-        <div className="worker-detail__connection">
-          <span
-            className={`worker-detail__status-dot ${wsConnected ? "worker-detail__status-dot--connected" : "worker-detail__status-dot--disconnected"}`}
-            aria-hidden="true"
-          />
-          <span className="worker-detail__status-text">
-            {wsConnected ? "Live" : "Reconnecting"}
-          </span>
-        </div>
-      </header>
 
-      {toast && (
-        <Toast
-          type={toast.type}
-          title={toast.title}
-          message={toast.message}
-          onClose={() => setToast(null)}
-        />
-      )}
+        <div className="worker-detail__content">
+          <div className="worker-detail__header">
+            <h2>Worker {worker.worker_id}</h1>
+            <div className="worker-status-badge {worker.status.toLowerCase()}">
+              {worker.status}
+            </div>
+          </div>
 
-      {/* Worker status card */}
-      <section className="worker-detail__status-card" aria-label="Worker status">
-        <div className="worker-detail__status-row">
-          <span className="worker-detail__status-label">Status:</span>
-          <span
-            className={`worker-detail__status-badge worker-detail__status-badge--${worker.status}`}
-          >
-            {worker.status}
-          </span>
-        </div>
-        <div className="worker-detail__metrics">
-          <div className="worker-detail__metric">
-            <span className="worker-detail__metric-label">Tasks Completed</span>
-            <span className="worker-detail__metric-value">{worker.tasks_completed}</span>
+          <div className="worker-detail__card">
+            <h3>Current Status</h3>
+            <p><strong>Status:</strong> {worker.status}</span>
           </div>
-          <div className="worker-detail__metric">
-            <span className="worker-detail__metric-label">CPU Usage</span>
-            <span className="worker-detail__metric-value">{worker.cpu_usage}%</span>
-          </div>
-          <div className="worker-detail__metric">
-            <span className="worker-detail__metric-label">Memory Usage</span>
-            <span className="worker-detail__metric-value">{worker.memory_usage}</span>
-          </div>
-          <div className="worker-detail__metric">
-            <span className="worker-detail__metric-label">Last Heartbeat</span>
-            <span className="worker-detail__metric-value">
-              {worker.last_heartbeat
-                ? new Date(worker.last_heartbeat).toLocaleTimeString()
-                : "N/A"}
-            </span>
-          </div>
-        </div>
-      </section>
 
-      {/* Execution history */}
-      <section className="worker-detail__events" aria-label="Execution history">
-        <h2 className="worker-detail__section-title">Execution History</h2>
-        {events.length === 0 ? (
-          <div className="empty-state">
-            <h3 className="empty-state__title">No Executions</h3>
-            <p className="empty-state__description">
-              No execution events have been recorded for this worker yet.
-            </p>
+          <div className="worker-detail__card">
+            <h3>Current Task</h3>
+            {tasks.length > 0 ? (
+              tasks.map((task) => (
+                <div key={task.id} className="task-item">
+                  <h4>{task.title}</h4>
+                  <p><strong>Status:</strong> {task.status}</span>
+                  <span className="task-badge {task.status.toLowerCase()}">{task.status}</span>
+                </div>
+              </div>
+            ) : (
+              <div className="task-empty">
+                <EmptyState
+                  title="No tasks assigned"
+                  description="This worker has no active tasks. Click 'Start' to begin a new task."
+                />
+              </div>
+            )}
           </div>
-        ) : (
-          <ExecutionTimeline events={events} />
-        )}
-      </section>
-    </div>
-  );
-};
+
+          <div className="worker-detail__card">
+            <h3>Execution Timeline</h3>
+            <ExecutionTimeline events={worker.execution_events || []} isLoading={isLoading} isLoading={isLoading} />
+          </div>
+
+          <div className="worker-detail__card">
+            <h3>Control Panel</h3>
+            <div className="worker-controls">
+              <button className="btn btn-primary" onClick={() => alert('Start execution (mock)')}>Start Execution</button>
+              <button className="btn btn-secondary" onClick={() => alert('Pause execution (mock)')}>Pause Execution</button>
+              <button className="btn btn-danger" onClick={() => alert('Retire worker (mock)')}>Retire Worker</button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
