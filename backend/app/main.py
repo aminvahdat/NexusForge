@@ -9,6 +9,8 @@ from app.db import init_database, close_database
 from app.api.health import router as health_router
 from app.api.tasks import router as tasks_router
 from app.api.execution import router as execution_router
+from app.api.approval import router as approval_router
+from app.api.worker import router as worker_controls_router
 
 # Configure structured logging (no secrets)
 def configure_logging() -> None:
@@ -83,6 +85,8 @@ def create_app() -> FastAPI:
     app.include_router(execution_router, prefix="/execution", tags=["execution", "realtime"])
     # Approval Center (Phase 5.6)
     app.include_router(approval_router, prefix="/approvals", tags=["approval", "security"])
+    # Worker controls (Phase 6)
+    app.include_router(worker_controls_router, prefix="/worker-controls", tags=["worker", "controls"])
 
     @app.get("/", tags=["root"])
     async def root():

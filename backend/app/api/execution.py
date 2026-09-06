@@ -15,7 +15,7 @@ from app.models import Project
 from app.schemas.task import TaskResponse
 from app.schemas.project import ProjectResponse
 from app.services.execution_monitor import monitor
-from app.services.worker import workers
+from app.services.worker import WorkerPool
 
 router = APIRouter(prefix="/execution", tags=["execution", "realtime"])
 logger = logging.getLogger(__name__)
@@ -132,6 +132,120 @@ async def complete_execution(
         await db_session.commit()
 
     return result_data
+
+
+@router.post("/{execution_id}/pause", response_model=dict, summary="Pause execution")
+async def pause_execution(
+    execution_id: str,
+    db_session: AsyncSession = Depends(get_db_session),
+):
+    """Pause an active execution."""
+    # Get execution state
+    state = monitor.active_executions.get(execution_id)
+    if not state:
+        raise HTTPException(status_code=404, detail=f"Execution {execution_id} not found")
+    
+    if state.status != "running":
+        raise HTTPException(status_code=400, detail=f"Execution {execution_id} is not running")
+    
+    # Update execution state
+    state.status = "paused"
+    state.paused_at = datetime.now(timezone.utc)
+    
+    # Update task status
+    task_result = await db_session.execute(select(Task).where(Task.id == state.task_id))
+    task = task_result.scalar_one_or_none()
+    if task:
+        task.status = "paused"
+        task.updated_at = datetime.now(timezone.utc)
+        await db_session.commit()
+    
+    # Emit execution.paused event
+    event = await monitor.update_execution_status(
+        execution_id, "paused", f"Execution {execution_id} paused by user request"
+    )
+    
+    return {
+        "execution_id": execution_id,
+        "status": "paused",
+        "message": f"Execution {execution_id} paused",
+        "paused_at": state.paused_at.isoformat()
+    }
+
+
+@router.post("/{execution_id}/resume", response_model=dict, summary="Resume execution")
+async def resume_execution(
+    execution_id: str,
+    db_session: AsyncSession = Depends(get_db_session),
+):
+    """Resume a paused execution."""
+    # Get execution state
+    state = monitor.active_executions.get(execution_id)
+    if not state:
+        raise HTTPException(status_code=404, detail=f"Execution {execution_id} not found")
+    
+    if state.status != "paused":
+        raise HTTPException(status_code=400, detail=f"Execution {execution_id} is not paused")
+    
+    # Update execution state
+    state.status = "running"
+    state.resumed_at = datetime.now(timezone.utc)
+    
+    # Update task status
+    task_result = await db_session.execute(select(Task).where(Task.id == state.task_id))
+    task = task_result.scalar_one_or_none()
+    if task:
+        task.status = "running"
+        task.updated_at = datetime.now(timezone.utc)
+        await db_session.commit()
+    
+    # Emit execution.resumed event
+    event = await monitor.update_execution_status(
+        execution_id, "resumed", f"Execution {execution_id} resumed by user request"
+    )
+    
+    return {
+        "execution_id": execution_id,
+        "status": "running",
+        "message": f"Execution {execution_id} resumed",
+        "resumed_at": state.resumed_at.isoformat()
+    }
+
+
+@router.post("/{execution_id}/retire", response_model=dict, summary="Retire execution")
+async def retire_execution(
+    execution_id: str,
+    db_session: AsyncSession = Depends(get_db_session),
+):
+    """Retire (cancel) an execution."""
+    # Get execution state
+    state = monitor.active_executions.get(execution_id)
+    if not state:
+        raise HTTPException(status_code=404, detail=f"Execution {execution_id} not found")
+    
+    # Update execution state
+    state.status = "retired"
+    state.retired_at = datetime.now(timezone.utc)
+    
+    # Update task status
+    task_result = await db_session.execute(select(Task).where(Task.id == state.task_id))
+    task = task_result.scalar_one_or_none()
+    if task:
+        task.status = "retired"
+        task.updated_at = datetime.now(timezone.utc)
+        await db_session.commit()
+    
+    # Emit execution.retired event
+    event = await monitor.update_execution_status(
+        execution_id, "retired", f"Execution {execution_id} retired by user request"
+    )
+    
+    return {
+        "execution_id": execution_id,
+        "status": "retired",
+        "message": f"Execution {execution_id} retired",
+        "retired_at": state.retired_at.isoformat()
+    }
 
 
 @router.get("/status/{execution_id}", response_model=dict, summary="Get execution status")

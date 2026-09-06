@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     default_project_name_format: str = Field(default="{type}-{year}-{number}")
 
     # Database (default to local Docker services; overridable via .env)
-    database_url: str = Field(default="postgresql://postgres:postgres@postgres:5432/nexusforge")
+    database_url: str = Field(default="postgresql+asyncpg://postgres:postgres@postgres:5432/nexusforge")
     database_pool_size: int = Field(default=10, ge=1)
     database_max_overflow: int = Field(default=20, ge=0)
     database_pool_timeout: int = Field(default=30, ge=1)
@@ -77,8 +77,8 @@ class Settings(BaseSettings):
     @field_validator('database_url')
     @classmethod
     def validate_database_url(cls, v: str) -> str:
-        if not v.startswith(('postgresql://', 'postgresql+asyncpg://')):
-            raise ValueError('DATABASE_URL must use postgresql:// scheme')
+        if not v.startswith(('postgresql+asyncpg://', 'postgresql+asyncpg://')):
+            raise ValueError('DATABASE_URL must use postgresql+asyncpg:// scheme')
         return v
 
     @field_validator('redis_url')

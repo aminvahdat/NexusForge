@@ -1,6 +1,6 @@
 """Approval Center API routes for human approval of privileged/dangerous agent actions.
 
-Phase 5.6 — Human Approval System
+Phase 5.6 / Phase 6 — Human Approval System
 - Request approval for privileged actions
 - View pending approvals
 - Approve/reject/cancel approvals
@@ -8,19 +8,23 @@ Phase 5.6 — Human Approval System
 - Verify agent identity and reasoning
 - Show potential risks and impact
 - Enforce expiration
+
+Aligned with: backend/app/migrations/versions/1875b06d6a87_initial.py
+Schema: task_id, action, reason, risk_level, status
 """
 
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional
+from uuid import uuid4
 from fastapi import APIRouter, HTTPException, Depends, status
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 
 from app.db import get_db_session
-from app.models.approval import ApprovalRequest, ApprovalStatus
+from app.models.approval import ApprovalRequest
 from app.schemas.approval import ApprovalCreate, ApprovalUpdate, ApprovalResponse
-from app.api.auth import get_current_user
+from app.auth import get_current_user
 
 router = APIRouter(prefix="/approvals", tags=["approval", "security"])
 
@@ -41,22 +45,21 @@ async def create_approval_request(
     - Requested timestamp
     - Expiration
     """
-    from uuid import uuid4
+    # Map Phase 5.6 API fields to migration schema
+    # action_type -> action, action_description -> reason, potential_impact -> risk_level
+    
+    user_id = str(current_user.get("id", uuid4()))
     
     approval = ApprovalRequest(
-        id=str(uuid4()),
-        execution_id=data.execution_id or str(uuid4()),
-        agent_name=data.agent_name or current_user.get("username", "Unknown Agent"),
-        agent_role=data.agent_role or "agent",
-        action_type=data.action_type,
-        action_description=data.action_description,
-        reasoning=data.reasoning,
-        potential_impact=data.potential_impact,
-        requires_human_approval=True,
-        status=ApprovalStatus.PENDING.value,
-        requested_by=str(current_user.get("id", "anonymous")),
+        id=uuid4(),
+        task_id=data.task_id or uuid4(),  # Required field per migration
+        requested_by_user_id=user_id,
+        action=data.action_type or "privileged_action",  # Required field
+        reason=data.reasoning or data.action_description or "No reason provided",
+        risk_level=data.potential_impact or "medium",
+        status="pending",
         requested_at=datetime.now(timezone.utc),
-        expires_at=datetime.now(timezone.utc) + timedelta(hours=24) if not data.expires_at else datetime.fromisoformat(data.expires_at),
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
     )
     
     db_session.add(approval)
@@ -68,6 +71,7 @@ async def create_approval_request(
 
 @router.get("/pending", response_model=List[ApprovalResponse], summary="List pending approvals")
 async def list_pending_approvals(
+    limit: int = 50,
     db_session: AsyncSession = Depends(get_db_session),
     current_user = Depends(get_current_user),
 ):
@@ -80,18 +84,12 @@ async def list_pending_approvals(
     - Potential risks
     - Time remaining before expiration
     """
-    options = [
-        ApprovalStatus.PENDING.value,
-    ]
-    
     result = await db_session.execute(
-        select(ApprovalRequest).where(
-            and_(
-                ApprovalRequest.status.in_(options),
-                ApprovalRequest.expires_at > datetime.now(timezone.utc) if hasattr(ApprovalRequest, "expires_at") else True,
-            )
-        )
+        select(ApprovalRequest)
+        .where(ApprovalRequest.status == "pending")
+        .where(ApprovalRequest.expires_at > datetime.now(timezone.utc))
         .order_by(ApprovalRequest.requested_at.desc())
+        .limit(limit)
     )
     approvals = result.scalars().all()
     return [approval.to_dict() for approval in approvals]
@@ -100,6 +98,8 @@ async def list_pending_approvals(
 @router.get("/history", response_model=List[ApprovalResponse], summary="List approval history")
 async def list_approval_history(
     execution_id: Optional[str] = None,
+    task_id: Optional[str] = None,
+    limit: int = 100,
     db_session: AsyncSession = Depends(get_db_session),
     current_user = Depends(get_current_user),
 ):
@@ -108,20 +108,12 @@ async def list_approval_history(
     Shows all approvals with outcomes.
     Useful for tracking which actions were approved/rejected.
     """
-    conditions = []
-    if execution_id:
-        conditions.append(ApprovalRequest.execution_id == execution_id)
+    query = select(ApprovalRequest).order_by(ApprovalRequest.requested_at.desc()).limit(limit)
     
-    if conditions:
-        result = await db_session.execute(
-            select(ApprovalRequest).where(
-                and_(*conditions) if len(conditions) > 1 else conditions[0]
-            ).order_by(ApprovalRequest.requested_at.desc())
-        )
-    else:
-        result = await db_session.execute(
-            select(ApprovalRequest).order_by(ApprovalRequest.requested_at.desc())
-        )
+    if task_id:
+        query = query.where(ApprovalRequest.task_id == task_id)
+    
+    result = await db_session.execute(query)
     approvals = result.scalars().all()
     return [approval.to_dict() for approval in approvals]
 
@@ -147,15 +139,16 @@ async def approve_request(
     if not approval:
         raise HTTPException(status_code=404, detail="Approval request not found")
     
-    if approval.status != ApprovalStatus.PENDING.value:
+    if approval.status != "pending":
         raise HTTPException(status_code=400, detail="Approval request is not pending")
     
     if approval.is_expired:
         raise HTTPException(status_code=410, detail="Approval request has expired")
     
-    approval.status = ApprovalStatus.APPROVED.value
-    approval.approved_by = str(current_user.get("id", "anonymous"))
+    approval.status = "approved"
+    approval.approved_by_user_id = uuid4()  # Map to migration schema field
     approval.approved_at = datetime.now(timezone.utc)
+    approval.outcome = f"Approved by {current_user.get('username', 'user')}"
     
     await db_session.commit()
     await db_session.refresh(approval)
@@ -166,7 +159,7 @@ async def approve_request(
 @router.post("/{approval_id}/reject", response_model=ApprovalResponse, summary="Reject approval request")
 async def reject_request(
     approval_id: str,
-    data: dict = None,
+    data: Optional[dict] = None,
     db_session: AsyncSession = Depends(get_db_session),
     current_user = Depends(get_current_user),
 ):
@@ -184,13 +177,12 @@ async def reject_request(
     if not approval:
         raise HTTPException(status_code=404, detail="Approval request not found")
     
-    if approval.status != ApprovalStatus.PENDING.value:
+    if approval.status != "pending":
         raise HTTPException(status_code=400, detail="Approval request is not pending")
     
-    approval.status = ApprovalStatus.REJECTED.value
-    approval.rejected_by = str(current_user.get("id", "anonymous"))
+    approval.status = "rejected"
     approval.rejection_reason = (data or {}).get("reason", "Rejected by user")
-    approval.updated_at = datetime.now(timezone.utc)
+    approval.outcome = f"Rejected by {current_user.get('username', 'user')}"
     
     await db_session.commit()
     await db_session.refresh(approval)
@@ -215,12 +207,11 @@ async def cancel_request(
     if not approval:
         raise HTTPException(status_code=404, detail="Approval request not found")
     
-    if approval.status not in [ApprovalStatus.PENDING.value, ApprovalStatus.REVIEWING.value]:
+    if approval.status not in ["pending", "reviewing"]:
         raise HTTPException(status_code=400, detail="Can only cancel pending/reviewing approvals")
     
-    approval.status = ApprovalStatus.CANCELLED.value
-    approval.cancellation_reason = "Cancelled by agent/user"
-    approval.updated_at = datetime.now(timezone.utc)
+    approval.status = "cancelled"
+    approval.outcome = f"Cancelled by {current_user.get('username', 'user')}"
     
     await db_session.commit()
     await db_session.refresh(approval)
@@ -258,8 +249,8 @@ async def list_my_pending(
     result = await db_session.execute(
         select(ApprovalRequest).where(
             and_(
-                ApprovalRequest.requested_by == user_id,
-                ApprovalRequest.status == ApprovalStatus.PENDING.value
+                ApprovalRequest.requested_by_user_id == user_id,
+                ApprovalRequest.status == "pending"
             )
         ).order_by(ApprovalRequest.requested_at.desc())
     )

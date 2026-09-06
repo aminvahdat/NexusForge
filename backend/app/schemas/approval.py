@@ -1,21 +1,14 @@
+"""Pydantic schemas for Approval Center — aligned with Alembic migration 1875b06d6a87."""
+
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional
 from pydantic import BaseModel, Field
+from uuid import UUID
 
 
 class ApprovalCreate(BaseModel):
-    execution_id: Optional[str] = None
-    agent_name: Optional[str] = None
-    agent_role: Optional[str] = None
-    action_type: str = Field(..., description="Type of action requiring approval")
-    action_description: str = Field(..., description="Detailed description of the action")
-    reasoning: str = Field(..., description="Why this action is needed")
-    potential_impact: str = Field(..., description="Potential risks and impact")
-    expires_at: Optional[str] = Field(None, description="ISO datetime when approval expires")
-    metadata: Optional[dict] = Field(default_factory=dict)
-
-
-class ApprovalUpdate(BaseModel):
+    """Create approval request — maps to migration schema."""
+    task_id: Optional[str] = None
     action_type: Optional[str] = None
     action_description: Optional[str] = None
     reasoning: Optional[str] = None
@@ -23,40 +16,25 @@ class ApprovalUpdate(BaseModel):
     expires_at: Optional[str] = None
 
 
+class ApprovalUpdate(BaseModel):
+    """Update approval request."""
+    status: Optional[str] = None
+    rejection_reason: Optional[str] = None
+    outcome: Optional[str] = None
+
+
 class ApprovalResponse(BaseModel):
+    """Response for approval request — matches migration schema."""
     id: str
-    execution_id: str
-    agent_name: str
-    agent_role: str
-    action_type: str
-    action_description: str
-    reasoning: str
-    potential_impact: str
-    requires_human_approval: bool
+    task_id: str
+    requested_by_user_id: str
+    action: str
+    reason: str
+    risk_level: str
     status: str
-    requested_by: str
-    requested_at: Optional[str]
-    expires_at: Optional[str]
-    approved_by: Optional[str]
-    approved_at: Optional[str]
-    rejected_by: Optional[str]
-    rejected_at: Optional[str]
-    rejection_reason: Optional[str]
-    cancelled_by: Optional[str]
-    cancelled_at: Optional[str]
-    cancellation_reason: Optional[str]
-    updated_at: str
-    is_expired: bool = False
-    is_pending: bool = False
-
-
-class ApprovalSummary(BaseModel):
-    id: str
-    agent_name: str
-    agent_role: str
-    action_type: str
-    status: str
-    requested_at: Optional[str]
-    expires_at: Optional[str]
-    is_expired: bool
-    is_pending: bool
+    requested_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+    approved_by_user_id: Optional[str] = None
+    approved_at: Optional[datetime] = None
+    rejection_reason: Optional[str] = None
+    outcome: Optional[str] = None

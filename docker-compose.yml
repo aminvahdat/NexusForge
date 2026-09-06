@@ -7,7 +7,7 @@ services:
       context: .
       dockerfile: Dockerfile
     environment:
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/nexusforge
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/nexusforge
     depends_on:
       postgres:
         condition: service_healthy
@@ -29,7 +29,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/nexusforge
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/nexusforge
       - REDIS_URL=redis://redis:6379/0
       - MAX_CONCURRENT_WORKERS=${MAX_CONCURRENT_WORKERS:-2}
       - JWT_SECRET_KEY=test-secret-key-32-chars-long-enough-for-hs256
@@ -51,7 +51,7 @@ services:
       dockerfile: Dockerfile
     command: ["python", "worker.py", "--worker-id", "nexusforge-worker-01", "--hostname", "worker-01"]
     environment:
-      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/nexusforge
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/nexusforge
       - REDIS_URL=redis://redis:6379/0
       - MAX_CONCURRENT_WORKERS=${MAX_CONCURRENT_WORKERS:-2}
       - JWT_SECRET_KEY=test-secret-key-32-chars-long-enough-for-hs256

@@ -1,4 +1,8 @@
-"""Authorization module for NexusForge."""
+"""Authorization module for NexusForge.
+
+Phase 6 — Final Migration & Handover
+Provides authentication and authorization utilities.
+"""
 
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -9,17 +13,20 @@ from jose import JWTError, jwt
 from pydantic import BaseModel
 
 from app.config.settings import get_settings
-from app.models.user import User
-from app.models.artifact import Artifact
-from app.models.project import Project
-from app.models.worker import Worker
+settings = get_settings()
+
+from app.models.user import User, UserCreate, UserResponse, Token
 
 # ── Constants ────────────────────────────────────────────────────────────────
-SECRET_KEY = get_settings().secret_key
+SECRET_KEY = settings.jwt_secret_key
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-# ── Schemas ────────────────────────────────────────────────────────────────
+# ── OAuth2 ───────────────────────────────────────────────────────────────────
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login", auto_error=False)
+
+
+# ── Schemas ──────────────────────────────────────────────────────────────────
 
 class RolePermissions(BaseModel):
     """Permission matrix for each role."""
@@ -46,23 +53,34 @@ class ResourceOwnership(BaseModel):
     worker: Optional[str] = None
 
 
-# ── Dependencies ────────────────────────────────────────────────────────────
+# ── Dependencies ─────────────────────────────────────────────────────────────
 
-def get_current_user(token: Optional[str] = Depends()) -> Optional[User]:
+def get_current_user(token: Optional[str] = Depends(oauth2_scheme)) -> Optional[User]:
     """Retrieve current user from JWT token."""
     if not token:
         return None
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        return User(**payload)
+        # Extract user_id from token payload
+        user_id = payload.get("sub")
+        if not user_id:
+            return None
+        # In real implementation, query database
+        return User(
+            id=user_id,
+            email=payload.get("email", "unknown@example.com"),
+            password_hash="",
+            is_active=True,
+            is_superuser=payload.get("is_superuser", False),
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
     except JWTError:
         return None
 
 
 def get_resource_permissions(user_id: str) -> dict[str, list[str]]:
     """Return permission matrix for a given user."""
-    # In production, query the database for user roles and permissions
-    # For now, return a simplified matrix
     return {
         "admin": ["*"],
         "chief_orchestrator": ["*"],
@@ -80,37 +98,13 @@ def get_resource_permissions(user_id: str) -> dict[str, list[str]]:
     }
 
 
-# ── API Endpoints ───────────────────────────────────────────────────────────
-
-@app.post("/auth/register", response_model=UserResponse, tags=["Authentication"])
-async def register(user: UserCreate) -> UserResponse:
-    """Register a new user."""
-    # Implementation: hash password, check uniqueness, create DB record
-    return UserResponse(
-        id="user_001",
-        email=user.email,
-        username=user.username,
-        full_name=user.full_name,
-        is_active=True,
-        is_superuser=False,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
-    )
-
-
-@app.post("/auth/login", response_model=Token, tags=["Authentication"])
-async def login(form: OAuth2PasswordRequestForm = Depends()) -> Token:
-    """Authenticate user and return JWT token."""
-    # Implementation: verify credentials, create token
-    return Token(
-        access_token="access_token_here",
-        token_type="bearer",
-    )
-
-
-@app.get("/auth/me", response_model=UserResponse, tags=["Authentication"])
-async def get_current_user_endpoint(current_user: Optional[User] = Depends(get_current_user)):
-    """Get current authenticated user."""
-    if current_user is None:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    return current_user
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+    """Create a JWT access token."""
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.now(timezone.utc) + expires_delta
+    else:
+        expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
