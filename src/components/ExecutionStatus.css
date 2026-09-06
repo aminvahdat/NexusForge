@@ -1,0 +1,57 @@
+/* Phase 5.5 Enhanced Real-Time Execution UX */
+
+/* ExecutionStatus component enhancements */
+
+/* Status badges with subtle animations */
+.status-queued {
+  animation: pulse 1.5s infinite ease-in-out;
+}
+
+.status-running {
+  animation: pulse 1.5s infinite ease-in-out;
+}
+
+status-completed {
+  animation: fade-in 0.5s ease-out;
+}
+
+status-failed {
+  animation: shake 0.5s ease-in;
+}
+
+status-cancelled {
+  animation: pulse 1.5s infinite ease-in-out;
+}
+
+.status-idle {
+  animation: none;
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+
+@keyframes fade-in {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+@keyframes shake {
+  0% { transform: translateX(0); }
+  25% { transform: translateX(-5px); }
+  50% { transform: translateX(5px); }
+  75% { transform: translateX(-5px); }
+  100% { transform: translateX(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-queued,
+  .status-running,
+  .status-completed,
+  .status-failed,
+  .status-cancelled {
+    animation: none;
+  }
+}

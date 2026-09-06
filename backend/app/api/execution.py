@@ -1,9 +1,10 @@
 """API routes for NexusForge execution monitoring and real-time event delivery."""
 
 import json
+import logging
 from datetime import datetime, timezone
-from typing import List, Optional
-from fastapi import APIRouter, HTTPException, Depends, WebSocket, WebSocketDisconnect
+from typing import List, Optional, Set, Dict, Any
+from fastapi import APIRouter, HTTPException, Depends, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -17,6 +18,66 @@ from app.services.execution_monitor import monitor
 from app.services.worker import workers
 
 router = APIRouter(prefix="/execution", tags=["execution", "realtime"])
+logger = logging.getLogger(__name__)
+
+# Connection tracking for cleanup
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: Set[WebSocket] = set()
+        self.connection_metadata: Dict[WebSocket, Dict[str, Any]] = {}
+
+    async def connect(self, websocket: WebSocket, client_id: str = None):
+        await websocket.accept()
+        self.active_connections.add(websocket)
+        self.connection_metadata[websocket] = {
+            "client_id": client_id,
+            "connected_at": datetime.now(timezone.utc),
+            "last_ping": datetime.now(timezone.utc),
+            "subscriptions": set(),
+        }
+        logger.info(f"WebSocket client connected: {client_id or 'unknown'} ({len(self.active_connections)} total)")
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.discard(websocket)
+        self.connection_metadata.pop(websocket, None)
+        logger.info(f"WebSocket client disconnected ({len(self.active_connections)} total)")
+
+    def update_ping(self, websocket: WebSocket):
+        if websocket in self.connection_metadata:
+            self.connection_metadata[websocket]["last_ping"] = datetime.now(timezone.utc)
+
+    def add_subscription(self, websocket: WebSocket, event_type: str):
+        if websocket in self.connection_metadata:
+            self.connection_metadata[websocket]["subscriptions"].add(event_type)
+
+    def remove_subscription(self, websocket: WebSocket, event_type: str):
+        if websocket in self.connection_metadata:
+            self.connection_metadata[websocket]["subscriptions"].discard(event_type)
+
+    def get_client_connections(self, client_id: str) -> Set[WebSocket]:
+        return {
+            ws for ws, meta in self.connection_metadata.items()
+            if meta.get("client_id") == client_id
+        }
+
+    async def broadcast_to_subscribers(self, event_type: str, data: dict):
+        """Broadcast event only to clients subscribed to this event type"""
+        disconnected = set()
+        for websocket in self.active_connections.copy():
+            try:
+                meta = self.connection_metadata.get(websocket, {})
+                subscriptions = meta.get("subscriptions", set())
+                if not subscriptions or event_type in subscriptions:
+                    await websocket.send_json(data)
+            except Exception as e:
+                logger.warning(f"Failed to send to websocket: {e}")
+                disconnected.add(websocket)
+        
+        # Clean up disconnected clients
+        for ws in disconnected:
+            self.disconnect(ws)
+
+connection_manager = ConnectionManager()
 
 
 @router.post("/start/{task_id}", response_model=dict, summary="Start a task execution")
@@ -96,3 +157,88 @@ async def list_executions():
             "events": len(state.events),
         }
     return {"active_executions": executions, "count": len(monitor.active_executions)}
+
+
+@router.websocket("/ws/{client_id}")
+async def websocket_endpoint(websocket: WebSocket, client_id: str):
+    """WebSocket endpoint for real-time execution updates.
+    
+    Phase 5.5 Hardening:
+    - ConnectionManager tracks all active connections
+    - Graceful disconnect handling
+    - Malformed message validation
+    - Connection metadata (subscriptions, ping)
+    - Auto-cleanup on disconnect
+    """
+    await connection_manager.connect(websocket, client_id)
+    logger.info(f"WebSocket connection established for client: {client_id}")
+    
+    try:
+        while True:
+            # Receive message
+            data = await websocket.receive_text()
+            
+            # Validate JSON
+            try:
+                message = json.loads(data)
+            except json.JSONDecodeError:
+                logger.warning(f"Malformed JSON from client {client_id}")
+                await websocket.send_json({
+                    "type": "error",
+                    "message": "Invalid JSON message"
+                })
+                continue
+            
+            # Handle message types
+            msg_type = message.get("type", "")
+            
+            if msg_type == "ping":
+                connection_manager.update_ping(websocket)
+                await websocket.send_json({"type": "pong"})
+                
+            elif msg_type == "subscribe":
+                event_types = message.get("event_types", [])
+                for et in event_types:
+                    connection_manager.add_subscription(websocket, et)
+                logger.debug(f"Client {client_id} subscribed: {event_types}")
+                
+            elif msg_type == "unsubscribe":
+                event_types = message.get("event_types", [])
+                for et in event_types:
+                    connection_manager.remove_subscription(websocket, et)
+                    
+            elif msg_type == "execution_subscribe":
+                execution_id = message.get("execution_id")
+                if execution_id:
+                    connection_manager.add_subscription(websocket, f"execution:{execution_id}")
+                    
+            elif msg_type == "execution_unsubscribe":
+                execution_id = message.get("execution_id")
+                if execution_id:
+                    connection_manager.remove_subscription(websocket, f"execution:{execution_id}")
+                    
+            else:
+                logger.warning(f"Unknown message type from {client_id}: {msg_type}")
+                await websocket.send_json({
+                    "type": "error",
+                    "message": f"Unknown message type: {msg_type}"
+                })
+                
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket client {client_id} disconnected normally")
+    except Exception as e:
+        logger.error(f"WebSocket error for client {client_id}: {e}")
+    finally:
+        connection_manager.disconnect(websocket)
+        logger.info(f"WebSocket cleanup complete for client: {client_id}")
+
+
+@router.get("/health", response_model=dict, summary="WebSocket and execution health check")
+async def websocket_health():
+    """Returns current WebSocket connection statistics for monitoring."""
+    return {
+        "status": "ok",
+        "active_connections": len(connection_manager.active_connections),
+        "active_executions": len(monitor.active_executions),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
