@@ -1,5 +1,12 @@
 import axios from "axios";
-import { Project, Task, HealthResponse, ProjectCreate, TaskCreate, TaskUpdate, ApiError } from "../types";
+import { 
+  Project, Task, HealthResponse, 
+  ProjectCreate, TaskCreate, TaskUpdate, ApiError,
+  Execution, ExecutionEvent, ExecutionCreateResponse, ExecutionCompleteResponse,
+  ExecutionStatusResponse, ExecutionListResponse,
+  Worker, WorkerListResponse, WorkerDetailResponse,
+  WebSocketMessage
+} from "../types";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
 
@@ -15,7 +22,6 @@ const apiClient = axios.create({
 apiClient.interceptors.request.use(
   (config) => {
     // Auth tokens would be injected here when Phase 3 auth is implemented
-    // For now, pass through without auth
     return config;
   },
   (error) => {
@@ -86,6 +92,58 @@ export const healthApi = {
 
   readiness: async (): Promise<HealthResponse> => {
     const response = await apiClient.get<HealthResponse>("/health/readiness");
+    return response.data;
+  },
+};
+
+// === EXECUTION API (Phase 5.4) ===
+export const executionApi = {
+  start: async (taskId: string): Promise<ExecutionCreateResponse> => {
+    const response = await apiClient.post<ExecutionCreateResponse>(`/execution/start/${taskId}`);
+    return response.data;
+  },
+
+  complete: async (
+    executionId: string, 
+    result?: string, 
+    error?: string
+  ): Promise<ExecutionCompleteResponse> => {
+    const params = new URLSearchParams();
+    if (result) params.append("result", result);
+    if (error) params.append("error", error);
+    const response = await apiClient.post<ExecutionCompleteResponse>(
+      `/execution/${executionId}/complete?${params.toString()}`
+    );
+    return response.data;
+  },
+
+  status: async (executionId: string): Promise<ExecutionStatusResponse> => {
+    const response = await apiClient.get<ExecutionStatusResponse>(`/execution/status/${executionId}`);
+    return response.data;
+  },
+
+  list: async (): Promise<ExecutionListResponse> => {
+    const response = await apiClient.get<ExecutionListResponse>("/execution/list");
+    return response.data;
+  },
+
+  getEvents: async (executionId: string): Promise<ExecutionEvent[]> => {
+    // This endpoint doesn't exist yet - would need to be added
+    // For now, events are in the execution status response
+    const response = await apiClient.get<{ events: ExecutionEvent[] }>(`/execution/${executionId}/events`);
+    return response.data.events;
+  },
+};
+
+// === WORKER API (Phase 5.4) ===
+export const workerApi = {
+  getAll: async (): Promise<WorkerListResponse> => {
+    const response = await apiClient.get<WorkerListResponse>("/workers");
+    return response.data;
+  },
+
+  getById: async (workerId: string): Promise<WorkerDetailResponse> => {
+    const response = await apiClient.get<WorkerDetailResponse>(`/workers/${workerId}`);
     return response.data;
   },
 };

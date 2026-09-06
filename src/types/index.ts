@@ -1,4 +1,4 @@
-// TypeScript types matching the NexusForge backend API schemas (updated for Phase 5.3)
+// Phase 5.3 — Existing types
 
 export interface Project {
   id: string;
@@ -159,3 +159,6 @@ export const WorkerStatus = {
   ERROR: "error",
   OFFLINE: "offline"
 } as const;
+
+// Phase 5.4 — Execution types
+export * from "./execution";

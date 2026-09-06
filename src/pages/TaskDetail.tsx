@@ -1,7 +1,9 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Task, Project } from "../types";
-import { taskApi, projectApi } from "../services/api";
+import { Task, Project, ExecutionEvent, WebSocketMessage } from "../types";
+import { taskApi, projectApi, executionApi } from "../services/api";
+import { ExecutionStatus } from "../components/ExecutionStatus";
+import { ExecutionTimeline } from "../components/ExecutionTimeline";
 import Loading from "../components/Loading";
 import "./TaskDetail.css";
 
@@ -13,32 +15,132 @@ const TaskDetail: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const [taskData, projectData] = await Promise.all([
-          taskApi.getById(taskId),
-          projectApi.getById(projectId),
-        ]);
-        setTask(taskData);
-        setProject(projectData);
-      } catch (err: any) {
-        setError(err.detail || "Failed to load task data");
-      } finally {
-        setLoading(false);
-      }
-    };
+  // Execution state
+  const [executionId, setExecutionId] = useState<string | null>(null);
+  const [executionStatus, setExecutionStatus] = useState<string>("");
+  const [executionEvents, setExecutionEvents] = useState<ExecutionEvent[]>([]);
+  const [executionError, setExecutionError] = useState<string | null>(null);
 
-    if (taskId && projectId) {
-      fetchData();
+  const fetchData = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      if (!taskId || !projectId) return;
+      const [taskData, projectData] = await Promise.all([
+        taskApi.getById(taskId),
+        projectApi.getById(projectId),
+      ]);
+      setTask(taskData);
+      setProject(projectData);
+    } catch (err: any) {
+      setError(err.detail || "Failed to load task data");
+    } finally {
+      setLoading(false);
     }
   }, [taskId, projectId]);
 
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  // WebSocket connection for real-time events
+  const [ws, setWs] = useState<WebSocket | null>(null);
+  const [wsConnected, setWsConnected] = useState(false);
+  const [wsReconnecting, setWsReconnecting] = useState(false);
+
+  useEffect(() => {
+    if (!executionId) return;
+
+    const wsUrl = `ws://localhost:8000/api/execution/ws/${executionId}`;
+    const websocket = new WebSocket(wsUrl);
+    setWs(websocket);
+
+    websocket.onopen = () => {
+      setWsConnected(true);
+      setWsReconnecting(false);
+      console.log("WebSocket connected for execution", executionId);
+    };
+
+    websocket.onmessage = (event) => {
+      try {
+        const msg: WebSocketMessage = JSON.parse(event.data);
+        if (msg.type === "execution_event" && msg.event) {
+          setExecutionEvents((prev) => {
+            // Prevent duplicates by event timestamp + type
+            const exists = prev.some(
+              (e) =>
+                e.event_type === msg.event.event_type &&
+                e.timestamp === msg.event.timestamp
+            );
+            if (exists) return prev;
+            return [...prev, msg.event];
+          });
+        } else if (msg.type === "state_sync") {
+          // Handle initial state sync
+        }
+      } catch (e) {
+        console.warn("Failed to parse WebSocket message:", e);
+      }
+    };
+
+    websocket.onerror = (err) => {
+      console.error("WebSocket error:", err);
+      setWsConnected(false);
+    };
+
+    websocket.onclose = () => {
+      console.log("WebSocket disconnected");
+      setWsConnected(false);
+      // Auto reconnect after a short delay
+      setWsReconnecting(true);
+      setTimeout(() => {
+        if (executionId) {
+          setWsReconnecting(false);
+          // Reconnect handled by effect re-run if executionId changes
+        }
+      }, 2000);
+    };
+
+    return () => {
+      websocket.close();
+      setWs(null);
+    };
+  }, [executionId]);
+
+  // Poll execution status (as fallback and initial check)
+  useEffect(() => {
+    if (!executionId) return;
+
+    const pollStatus = async () => {
+      try {
+        const statusData = await executionApi.status(executionId);
+        setExecutionStatus(statusData.status);
+      } catch (err) {
+        console.warn("Failed to poll execution status:", err);
+      }
+    };
+
+    pollStatus();
+    const interval = setInterval(pollStatus, 3000);
+    return () => clearInterval(interval);
+  }, [executionId]);
+
+  const handleStartExecution = async () => {
+    if (!taskId) return;
+    try {
+      const result = await executionApi.start(taskId);
+      setExecutionId(result.execution_id);
+      setExecutionStatus(result.status);
+      setExecutionEvents(result.event ? [result.event] : []);
+      setExecutionError(null);
+    } catch (err: any) {
+      setError(err.detail || "Failed to start execution");
+    }
+  };
+
   const handleStatusChange = async (newStatus: string) => {
     try {
-      const updated = await taskApi.update(taskId, { status: newStatus });
+      const updated = await taskApi.update(taskId!, { status: newStatus });
       setTask(updated);
     } catch (err: any) {
       setError(err.detail || "Failed to update task status");
@@ -71,14 +173,14 @@ const TaskDetail: React.FC = () => {
   };
 
   const getRoleLabel = (role: string) => {
-    return role.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase());
+    return role.replace(/_/, " ").replace(/\b\w/g, (l) => l.toUpperCase());
   };
 
   if (loading) {
     return <Loading message="Loading task..." />;
   }
 
-  if (error) {
+  if (error && !executionId) {
     return (
       <div className="task-detail">
         <div className="alert alert-error" role="alert">
@@ -94,9 +196,7 @@ const TaskDetail: React.FC = () => {
   if (!task || !project) {
     return (
       <div className="task-detail">
-        <div className="alert alert-error" role="alert">
-          Task or project not found.
-        </div>
+        <div className="alert alert-error" role="alert">Task or project not found.</div>
       </div>
     );
   }
@@ -107,9 +207,9 @@ const TaskDetail: React.FC = () => {
     return newStatus !== task.status;
   };
 
-  const possibleTransitions = ["queued", "planning", "ready", "running", "waiting", "reviewing", "completed", "failed", "cancelled"].filter(status => 
-    canTransitionTo(status) && status !== "queued"
-  );
+  const possibleTransitions = [
+    "queued", "planning", "ready", "running", "waiting", "reviewing", "completed", "failed", "cancelled",
+  ].filter((status) => canTransitionTo(status) && status !== "queued");
 
   return (
     <div className="task-detail">
@@ -130,6 +230,54 @@ const TaskDetail: React.FC = () => {
           </span>
         </div>
       </header>
+
+      {/* Execution Monitoring Section */}
+      <section className="task-detail__section task-detail__execution">
+        <h2 className="task-detail__section-title">Execution Monitoring</h2>
+        <div className="execution-monitor">
+          <div className="execution-monitor__header">
+            <h3>Live Execution</h3>
+            {!executionId ? (
+              <button className="btn btn-primary btn-sm" onClick={handleStartExecution}>
+                Start Execution
+              </button>
+            ) : (
+              <div className="execution-monitor__status-row">
+                <ExecutionStatus status={executionStatus} error={executionError || undefined} />
+                <span className="execution-monitor__execution-id">ID: {executionId}</span>
+                <span className={`execution-monitor__connection ${wsConnected ? "connected" : wsReconnecting ? "reconnecting" : "disconnected"}`}>
+                  {wsConnected ? "● Live" : wsReconnecting ? "↻ Reconnecting" : "○ Offline"}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {executionId && (
+            <>
+              <div className="execution-monitor__info">
+                <div className="execution-info__row">
+                  <span className="label">Task:</span>
+                  <span className="mono">{task.id.slice(0, 8)}...</span>
+                </div>
+                <div className="execution-info__row">
+                  <span className="label">Status:</span>
+                  <span className="mono">{executionStatus || "-"}</span>
+                </div>
+                <div className="execution-info__row">
+                  <span className="label">Worker:</span>
+                  <span className="mono">{executionEvents.find((e) => e.event_type === "WORKER_ASSIGNED")?.worker_id || task.assigned_worker || "Not assigned"}</span>
+                </div>
+                <div className="execution-info__row">
+                  <span className="label">Events:</span>
+                  <span className="mono">{executionEvents.length}</span>
+                </div>
+              </div>
+
+              <ExecutionTimeline events={executionEvents} />
+            </>
+          )}
+        </div>
+      </section>
 
       <section className="task-detail__section">
         <h2 className="task-detail__section-title">Task Overview</h2>

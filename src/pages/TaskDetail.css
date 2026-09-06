@@ -215,4 +215,144 @@
     flex-direction: column;
     align-items: stretch;
   }
+}/* Phase 5.5 Enhanced Real-Time Execution UX */
+
+/* Enhanced status badge with pulse animation for live updates */
+.execution-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 9999px;
+}
+
+.execution-status__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 9999px;
+  font-weight: 600;
+  font-size: 0.875rem;
+  letter-spacing: 0.025em;
+  transition: all 0.2s ease;
+  border: 1.5px solid transparent;
+}
+
+/* Live pulse animation - only when status is actively changing */
+.execution-status--live .execution-status__badge {
+  animation: live-pulse 2s ease-in-out infinite;
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.15);
+}
+
+@keyframes live-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.15); }
+  50%     { box-shadow: 0 0 0 6px rgba(124, 58, 237, 0.05); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .execution-status--live .execution-status__badge {
+    animation: none;
+    box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.2);
+  }
+}
+
+/* Execution timeline enhanced */
+.execution-timeline__item {
+  position: relative;
+  padding-left: 1.75rem;
+  padding-bottom: 1.25rem;
+  border-left: 2px solid var(--color-border, #DDD6FE);
+  margin-left: 0.5rem;
+  transition: all 0.3s ease;
+}
+
+.execution-timeline__dot {
+  position: absolute;
+  left: -6px;
+  top: 0.25rem;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--color-primary, #7C3AED);
+  border: 2px solid var(--color-card, #FFFFFF);
+  box-shadow: 0 0 0 2px var(--color-border, #DDD6FE);
+  transition: background 0.2s ease, transform 0.15s ease;
+}
+
+.execution-timeline__item:hover .execution-timeline__dot {
+  transform: scale(1.25);
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.2);
+}
+
+/* Empty state with subtle animation */
+.empty-state {
+  text-align: center;
+  padding: 2rem;
+  color: var(--color-muted-foreground, #475569);
+}
+
+.empty-state__icon {
+  animation: empty-state-float 3s ease-in-out infinite;
+  color: var(--color-muted, #ECEEF9);
+}
+
+@keyframes empty-state-float {
+  0%, 100% { transform: translateY(0); }
+  50%     { transform: translateY(-4px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .empty-state__icon { animation: none; }
+}
+
+/* Connection status indicator */
+.connection-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 9999px;
+  font-weight: 500;
+}
+
+.connection-indicator--connected {
+  background: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+}
+
+.connection-indicator--disconnected {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  animation: connection-blink 1s ease-in-out infinite;
+}
+
+@keyframes connection-blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0.5; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .connection-indicator--disconnected { animation: none; opacity: 1; }
+}
+
+/* Refresh button hover */
+.execution-status__refresh {
+  transition: transform 0.15s ease, color 0.15s ease;
+}
+
+.execution-status__refresh:hover {
+  transform: rotate(90deg);
+  color: var(--color-primary, #7C3AED);
+}
+
+/* Enhanced info rows */
+.execution-monitor__info {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem;
+  background: var(--color-muted, #ECEEF9);
+  border-radius: 8px;
+  border: 1px solid var(--color-border, #DDD6FE);
 }

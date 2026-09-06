@@ -1,11 +1,4 @@
 #!/usr/bin/env python3
-"""NexusForge Worker — Complete executable worker process (Phase 4E).
-
-Full lifecycle: connect, register, heartbeat, claim, load role,
-create workspace, invoke Hermes, capture result, persist events,
-collect artifacts, update task, return to idle.
-"""
-
 import asyncio
 import argparse
 import logging
@@ -24,6 +17,8 @@ from app.config.settings import get_settings
 from app.models.enums import AgentRole as DBAgentRole, TaskStatus
 from app.db import get_engine, get_session_factory
 from app.services.redis import get_redis
+from app.services.execution_monitor import monitor
+from app.execution.events import EventType
 from app.core.runtime.agent_runtime import HermesRuntimeAdapter, ExecutionContext, Status
 
 # Configure structlog (sync)
@@ -66,7 +61,7 @@ class WorkerProcess:
         # PostgreSQL: test connection by getting a session and running SELECT 1
         try:
             engine = await self._get_engine()
-            async with self._engine.connect() as conn:
+            async with engine.connect() as conn:
                 result = await conn.execute(text("SELECT 1 AS result"))
                 row = result.scalar()
                 if row == 1:
@@ -127,6 +122,14 @@ class WorkerProcess:
                     logger.info("no_queued_task", worker_id=self.worker_id)
                     return False
 
+                # Create execution record in ExecutionMonitor
+                execution_result = await monitor.start_execution(
+                    task_id=str(task.id),
+                    worker_id=self.worker_id,
+                )
+                execution_id = execution_result["execution_id"]
+                logger.info("execution_created", execution_id=execution_id, task_id=str(task.id))
+
                 # Claim it
                 task.status = TaskStatus.RUNNING
                 task.assigned_worker = self.worker_id
@@ -134,15 +137,22 @@ class WorkerProcess:
                 await session.commit()
                 logger.info("task_claimed", task_id=str(task.id), worker_id=self.worker_id)
 
+                # Emit execution.started event
+                event = await monitor.update_execution_status(
+                    execution_id, "started", f"Execution started by worker {self.worker_id}"
+                )
+                if event:
+                    logger.info("execution_started_event", execution_id=execution_id, event_type=event.event_type.name)
+
                 # Execute
-                await self.execute_task(session, task)
+                await self.execute_task(session, task, execution_id)
                 return True
 
         except Exception as exc:
             logger.error("claim_task_failed", worker_id=self.worker_id, error=str(exc))
             return False
 
-    async def execute_task(self, session, task) -> None:
+    async def execute_task(self, session, task, execution_id: str) -> None:
         """Execute task via Hermes runtime."""
         try:
             # Load role (map DB role name to adapter role)
@@ -160,6 +170,8 @@ class WorkerProcess:
                     task.error_message = f"Hermes init failed: {exc}"
                     task.completed_at = datetime.now(timezone.utc)
                     await session.commit()
+                    # Emit execution.failed event
+                    await monitor.complete(execution_id, error=str(exc))
                     return
 
             # Workspace
@@ -199,6 +211,15 @@ class WorkerProcess:
                 duration=result.execution_duration_sec,
             )
 
+            # Emit execution completed/failed event
+            if task.status == TaskStatus.COMPLETED:
+                await monitor.complete(execution_id, result=result.output)
+                logger.info("execution_completed_event", execution_id=execution_id)
+            else:
+                error_msg = task.error_message or "Unknown error"
+                await monitor.complete(execution_id, error=error_msg)
+                logger.info("execution_failed_event", execution_id=execution_id, error=error_msg)
+
             self.adapter.terminate(session_id)
 
         except Exception as exc:
@@ -207,6 +228,9 @@ class WorkerProcess:
             task.error_message = str(exc)
             task.completed_at = datetime.now(timezone.utc)
             await session.commit()
+
+            # Emit execution.failed event
+            await monitor.complete(execution_id, error=str(exc))
 
     def _map_role(self, role_str: str) -> DBAgentRole:
         """Map DB role name to adapter AgentRole (hardcoded in agent_runtime)."""

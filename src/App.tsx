@@ -8,6 +8,9 @@ import ProjectDetail from "./pages/ProjectDetail";
 import TaskList from "./pages/TaskList";
 import TaskDetail from "./pages/TaskDetail";
 import Dashboard from "./pages/Dashboard";
+import Activity from "./pages/Activity";
+import WorkersPage from "./pages/WorkersPage";
+import WorkerDetail from "./pages/WorkerDetail";
 import Navigation from "./components/Navigation";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
@@ -36,10 +39,13 @@ function App() {
     <Router>
       <div className="app">
         <Navigation />
-
+        
         <main className="app__main">
           <Routes>
             <Route path="/" element={<Dashboard />} />
+            <Route path="/activity" element={<Activity />} />
+            <Route path="/workers" element={<WorkersPage />} />
+            <Route path="/workers/:id" element={<WorkerDetail />} />
             <Route path="/projects" element={<ProjectList />} />
             <Route path="/projects/:projectId" element={<ProjectDetail />} />
             <Route path="/tasks/:projectId" element={<TaskList />} />

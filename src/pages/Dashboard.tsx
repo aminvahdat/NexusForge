@@ -1,25 +1,44 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Project, HealthResponse } from "../types";
-import { healthApi, projectApi } from "../services/api";
+import { Project, HealthResponse, ExecutionEvent, WebSocketMessage } from "../types";
+import { healthApi, projectApi, executionsApi } from "../services/api";
+import { ExecutionStatus } from "../components/ExecutionStatus";
+import { Toast } from "../components/Toast";
+import { Skeleton } from "../components/Skeleton";
 import "./Dashboard.css";
 
 const Dashboard: React.FC = () => {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [activeExecutions, setActiveExecutions] = useState(0);
+  const [recentEvents, setRecentEvents] = useState<ExecutionEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [wsConnected, setWsConnected] = useState(false);
+  const [toast, setToast] = useState<{
+    type: "success" | "error" | "info";
+    title: string;
+    message: string;
+  } | null>(null);
 
   const fetchDashboardData = async () => {
     setLoading(true);
     setError(null);
     try {
-      const [healthData, projectsData] = await Promise.all([
+      const [healthData, projectsData, eventsData] = await Promise.all([
         healthApi.check(),
         projectApi.getAll(),
+        executionsApi.list(),
       ]);
       setHealth(healthData);
       setProjects(projectsData);
+      setRecentEvents(eventsData.slice(0, 5));
+      setActiveExecutions(
+        eventsData.filter(
+          (e: ExecutionEvent) =>
+            e.event_type === "EXECUTION_STARTED" || e.execution_status === "running"
+        ).length
+      );
     } catch (err: any) {
       setError(err.detail || "Failed to load dashboard data");
     } finally {
@@ -29,6 +48,46 @@ const Dashboard: React.FC = () => {
 
   useEffect(() => {
     fetchDashboardData();
+  }, []);
+
+  // WebSocket for real-time updates
+  useEffect(() => {
+    const clientId = "dashboard-" + Date.now();
+    const ws = new WebSocket(
+      `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/execution/ws/${clientId}`
+    );
+
+    ws.onopen = () => setWsConnected(true);
+    ws.onmessage = (event) => {
+      try {
+        const message: WebSocketMessage = JSON.parse(event.data);
+        if (message.type === "execution_event" && message.data) {
+          const newEvent = message.data as ExecutionEvent;
+          setRecentEvents((prev) => {
+            const exists = prev.some(
+              (e) =>
+                e.event_type === newEvent.event_type &&
+                e.timestamp === newEvent.timestamp &&
+                e.worker_id === newEvent.worker_id
+            );
+            if (exists) return prev;
+            return [newEvent, ...prev].slice(0, 5);
+          });
+        } else if (message.type === "execution_complete" || message.type === "execution_failed") {
+          setToast({
+            type: message.type === "execution_complete" ? "success" : "error",
+            title: message.type === "execution_complete" ? "Execution Complete" : "Execution Failed",
+            message: `An execution just ${message.type === "execution_complete" ? "completed" : "failed"}.`,
+          });
+        }
+      } catch {
+        // Ignore parse errors
+      }
+    };
+    ws.onerror = () => setWsConnected(false);
+    ws.onclose = () => setWsConnected(false);
+
+    return () => ws.close();
   }, []);
 
   const recentProjects = projects.slice(0, 5);
@@ -42,13 +101,45 @@ const Dashboard: React.FC = () => {
             Your autonomous software development workspace
           </p>
         </div>
-        <button className="btn btn-primary" onClick={fetchDashboardData}>
-          <RefreshIcon />
-          Refresh
-        </button>
+        <div className="dashboard__header-actions">
+          <ExecutionStatus
+            status={wsConnected ? "running" : "disconnected"}
+            isLive={wsConnected}
+            connected={wsConnected}
+            onRefresh={fetchDashboardData}
+          />
+          <button className="btn btn-primary" onClick={fetchDashboardData}>
+            <RefreshIcon />
+            Refresh
+          </button>
+        </div>
       </header>
 
+      {toast && (
+        <Toast
+          type={toast.type}
+          title={toast.title}
+          message={toast.message}
+          onClose={() => setToast(null)}
+        />
+      )}
+
       <div className="dashboard__content">
+        {/* Real-time Activity Section */}
+        <section className="dashboard__section">
+          <h2 className="dashboard__section-title">Real-Time Activity</h2>
+          <div className="dashboard__activity-stats">
+            <div className="dashboard__activity-card">
+              <h3 className="dashboard__activity-value">{activeExecutions}</h3>
+              <p className="dashboard__activity-label">Active Executions</p>
+            </div>
+            <div className="dashboard__activity-card">
+              <h3 className="dashboard__activity-value">{recentEvents.length}</h3>
+              <p className="dashboard__activity-label">Recent Events</p>
+            </div>
+          </div>
+        </section>
+
         {/* Health & Status Section */}
         <section className="dashboard__section">
           <h2 className="dashboard__section-title">System Status</h2>
@@ -56,17 +147,17 @@ const Dashboard: React.FC = () => {
             <HealthCard
               label="API"
               status={health?.status === "ok" ? "Healthy" : "Error"}
-              icon={health?.status === "ok" ? "✅" : "❌"}
+              icon={health?.status === "ok" ? "✓" : "✗"}
             />
             <HealthCard
               label="Database"
               status={health?.checks?.database ? "Connected" : "Error"}
-              icon={health?.checks?.database ? "✅" : "❌"}
+              icon={health?.checks?.database ? "✓" : "✗"}
             />
             <HealthCard
               label="Redis"
               status={health?.checks?.redis ? "Connected" : "Error"}
-              icon={health?.checks?.redis ? "✅" : "❌"}
+              icon={health?.checks?.redis ? "✓" : "✗"}
             />
           </div>
         </section>
@@ -117,13 +208,19 @@ const Dashboard: React.FC = () => {
 
       {/* Quick Actions */}
       <aside className="dashboard__quick-actions">
-        <button className="btn btn-outline" disabled title="Coming in Phase 5.5">
+        <button className="btn btn-outline" onClick={() => window.location.assign("/activity")}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M9 11h6"></path>
-            <path d="M12 8v8"></path>
-            <circle cx="12" cy="12" r="9"></circle>
+            <circle cx="12" cy="12" r="10"></circle>
+            <polyline points="12 6 12 12 16 14"></polyline>
           </svg>
-          New Task
+          View Activity
+        </button>
+        <button className="btn btn-outline" onClick={() => window.location.assign("/workers")}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <rect x="2" y="2" width="20" height="8" rx="2"></rect>
+            <rect x="2" y="14" width="20" height="8" rx="2"></rect>
+          </svg>
+          View Workers
         </button>
       </aside>
     </div>
