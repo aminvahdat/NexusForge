@@ -2,8 +2,17 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
   <title>NexusForge — Autonomous Software Development</title>
+  <script>
+    window.onerror = function(msg, url, line, col, error) {
+      var d = error ? (error.name + ': ' + error.message + '\n\n' + (error.stack || '')) : msg;
+      document.body.innerHTML = '<div style="background:#0f172a;color:#f87171;padding:24px;font-family:system-ui,monospace;white-space:pre-wrap;position:fixed;inset:0;z-index:99999;overflow:auto;"><h2>Fatal Frontend Crash</h2><pre>' + d + '</pre></div>';
+    };
+    window.addEventListener('unhandledrejection', function(event) {
+      document.body.innerHTML = '<div style="background:#0f172a;color:#f87171;padding:24px;font-family:system-ui,monospace;white-space:pre-wrap;position:fixed;inset:0;z-index:99999;overflow:auto;"><h2>Unhandled Promise Rejection</h2><pre>' + event.reason + '</pre></div>';
+    });
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">

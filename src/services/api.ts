@@ -1,6 +1,6 @@
 import axios from "axios";
-import { 
-  Project, Task, HealthResponse, 
+import {
+  Project, Task, HealthResponse,
   ProjectCreate, TaskCreate, TaskUpdate, ApiError,
   Execution, ExecutionEvent, ExecutionCreateResponse, ExecutionCompleteResponse,
   ExecutionStatusResponse, ExecutionListResponse,
@@ -8,10 +8,9 @@ import {
   WebSocketMessage
 } from "../types";
 
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
-
+// All requests go through nginx at the same origin — no host/port needed
 const apiClient = axios.create({
-  baseURL: `${API_BASE}/api`,
+  baseURL: import.meta.env.VITE_API_BASE || "/api",
   timeout: 30000,
   headers: {
     "Content-Type": "application/json",
@@ -21,7 +20,6 @@ const apiClient = axios.create({
 // Request interceptor
 apiClient.interceptors.request.use(
   (config) => {
-    // Auth tokens would be injected here when Phase 3 auth is implemented
     return config;
   },
   (error) => {
@@ -60,10 +58,8 @@ export const projectApi = {
 
 // === TASK API ===
 export const taskApi = {
-  getAllByProject: async (projectId: string, status?: string): Promise<Task[]> => {
-    const params: Record<string, any> = {};
-    if (status) params.status = status;
-    const response = await apiClient.get<Task[]>(`/projects/${projectId}/tasks`, { params });
+  getAll: async (): Promise<Task[]> => {
+    const response = await apiClient.get<Task[]>("/tasks");
     return response.data;
   },
 
@@ -90,8 +86,14 @@ export const healthApi = {
     return response.data;
   },
 
+  // Direct root endpoint — backend serves /health via router, but / is root
+  checkHealthDirect: async (): Promise<HealthResponse> => {
+    const response = await apiClient.get<HealthResponse>("/health/health");
+    return response.data;
+  },
+
   readiness: async (): Promise<HealthResponse> => {
-    const response = await apiClient.get<HealthResponse>("/health/readiness");
+    const response = await apiClient.get<HealthResponse>("/health");
     return response.data;
   },
 };
@@ -104,8 +106,8 @@ export const executionApi = {
   },
 
   complete: async (
-    executionId: string, 
-    result?: string, 
+    executionId: string,
+    result?: string,
     error?: string
   ): Promise<ExecutionCompleteResponse> => {
     const params = new URLSearchParams();
@@ -126,13 +128,6 @@ export const executionApi = {
     const response = await apiClient.get<ExecutionListResponse>("/execution/list");
     return response.data;
   },
-
-  getEvents: async (executionId: string): Promise<ExecutionEvent[]> => {
-    // This endpoint doesn't exist yet - would need to be added
-    // For now, events are in the execution status response
-    const response = await apiClient.get<{ events: ExecutionEvent[] }>(`/execution/${executionId}/events`);
-    return response.data.events;
-  },
 };
 
 // === WORKER API (Phase 5.4) ===
@@ -149,3 +144,4 @@ export const workerApi = {
 };
 
 export default apiClient;
+export { apiClient as api };

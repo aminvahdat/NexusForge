@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Project, Task, ExecutionEvent, WebSocketMessage } from "../types";
-import { executionApi } from "../services/api";
-import { ProjectList } from "../components/ProjectList";
-import { TaskList } from "../components/TaskList";
+import { executionApi, projectApi, taskApi } from "../services/api";
+import ProjectList from "../components/ProjectList";
+import TaskList from "../components/TaskList";
 import { ExecutionStatus } from "../components/ExecutionStatus";
 import { ExecutionTimeline } from "../components/ExecutionTimeline";
 import { Skeleton } from "../components/Skeleton";
 import { Toast } from "../components/Toast";
+import { EmptyState } from "../components/EmptyState";
 import "./Activity.css";
 
 /* Activity overview page — combines task execution, project stats, and real-time monitoring */
@@ -31,8 +32,8 @@ export const ActivityPage: React.FC = () => {
   const loadData = async () => {
     try {
       setLoading(true);
-      const projectsRes = await api.projects.list();
-      const tasksRes = await api.tasks.list();
+      const projectsRes = await projectApi.getAll();
+      const tasksRes = await taskApi.getAll();
       setProjects(projectsRes.data || []);
       setTasks(tasksRes.data || []);
 
@@ -215,3 +216,5 @@ export const ActivityPage: React.FC = () => {
     </div>
   );
 };
+
+export default ActivityPage;

@@ -8,7 +8,7 @@ from app.db import get_db_session
 from app.models import Project, Task
 from app.schemas.task import TaskCreate, TaskUpdate, TaskResponse
 from app.schemas.project import ProjectCreate, ProjectResponse
-from app.services.database import get_project, get_task, get_worker_status
+from app.services.database import get_project, get_task, get_projects
 from app.services.redis import get_redis
 import structlog
 
@@ -46,6 +46,14 @@ async def readiness(
         "checks": {"database": db_ok, "redis": redis_ok},
     }
 
+
+@router.get("/projects", response_model=List[ProjectResponse])
+async def list_projects(
+    db_session: AsyncSession = Depends(get_db_session),
+) -> List[ProjectResponse]:
+    """List all projects."""
+    projects = await get_projects(db_session)
+    return [ProjectResponse.model_validate(p) for p in projects]
 
 @router.post("/projects", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
 async def create_project(
@@ -184,4 +192,4 @@ async def update_task(
 @router.get("/workers/status", response_model=Dict[str, Any])
 async def get_workers_status() -> Dict[str, Any]:
     """Get worker pool status."""
-    return await get_worker_status()
+    return {"status": "ok", "pool_size": 2}

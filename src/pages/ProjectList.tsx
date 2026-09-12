@@ -3,7 +3,6 @@ import { Link, useNavigate } from "react-router-dom";
 import { Project, ProjectCreate } from "../types";
 import { projectApi } from "../services/api";
 import Loading from "../components/Loading";
-import "./ProjectListPage.css";
 
 const ProjectListPage: React.FC = () => {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -138,7 +137,7 @@ const ProjectListPage: React.FC = () => {
 
       {projects.length > 0 && (
         <div className="page__grid" role="list">
-          {projects.map((project) => (
+          {(projects || []).map((project) => (
             <article
               key={project.id}
               className="page__card"

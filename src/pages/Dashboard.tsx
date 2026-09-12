@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Project, HealthResponse, ExecutionEvent, WebSocketMessage } from "../types";
-import { healthApi, projectApi, executionsApi } from "../services/api";
-import { ExecutionStatus } from "../components/ExecutionStatus";
-import { Toast } from "../components/Toast";
+import { healthApi, projectApi, executionApi } from "../services/api";
+import { ToastProvider as Toast } from "../components/Toast";
 import { Skeleton } from "../components/Skeleton";
-import "./Dashboard.css";
+import { ExecutionStatus } from "../components/ExecutionStatus";
+import "../components/Dashboard.css";
 
 const Dashboard: React.FC = () => {
   const [health, setHealth] = useState<HealthResponse | null>(null);
@@ -28,7 +28,7 @@ const Dashboard: React.FC = () => {
       const [healthData, projectsData, eventsData] = await Promise.all([
         healthApi.check(),
         projectApi.getAll(),
-        executionsApi.list(),
+        executionApi.list(),
       ]);
       setHealth(healthData);
       setProjects(projectsData);
@@ -53,9 +53,8 @@ const Dashboard: React.FC = () => {
   // WebSocket for real-time updates
   useEffect(() => {
     const clientId = "dashboard-" + Date.now();
-    const ws = new WebSocket(
-      `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/execution/ws/${clientId}`
-    );
+    const wsUrl = `${window.location.protocol === "https:" ? "wss:" : "ws:"}://${window.location.host}/execution/ws/${clientId}`;
+    const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => setWsConnected(true);
     ws.onmessage = (event) => {
@@ -92,6 +91,11 @@ const Dashboard: React.FC = () => {
 
   const recentProjects = projects.slice(0, 5);
 
+  // Health status helpers
+  const apiStatus = health?.api === "healthy" || health?.api === "ok" ? "online" : "error";
+  const dbStatus = (health?.database === "healthy" || health?.db === "healthy" || health?.database === "ok") ? "online" : "error";
+  const redisStatus = (health?.redis === "healthy" || health?.redis === "ok") ? "online" : "error";
+
   return (
     <div className="dashboard">
       <header className="dashboard__header">
@@ -125,46 +129,52 @@ const Dashboard: React.FC = () => {
       )}
 
       <div className="dashboard__content">
-        {/* Real-time Activity Section */}
-        <section className="dashboard__section">
+        {/* Real-Time Activity Section - Metrics Grid */}
+        <section className="dashboard__section dashboard-card">
           <h2 className="dashboard__section-title">Real-Time Activity</h2>
-          <div className="dashboard__activity-stats">
-            <div className="dashboard__activity-card">
-              <h3 className="dashboard__activity-value">{activeExecutions}</h3>
-              <p className="dashboard__activity-label">Active Executions</p>
+          <div className="metrics-grid">
+            <div className="metric-card">
+              <p className="metric-value">{activeExecutions}</p>
+              <p className="metric-label">Active Executions</p>
             </div>
-            <div className="dashboard__activity-card">
-              <h3 className="dashboard__activity-value">{recentEvents.length}</h3>
-              <p className="dashboard__activity-label">Recent Events</p>
+            <div className="metric-card">
+              <p className="metric-value">{recentEvents.length}</p>
+              <p className="metric-label">Recent Events</p>
             </div>
           </div>
         </section>
 
-        {/* Health & Status Section */}
-        <section className="dashboard__section">
+        {/* System Status Section - 3-column grid with pill badges */}
+        <section className="dashboard__section dashboard-card">
           <h2 className="dashboard__section-title">System Status</h2>
-          <div className="dashboard__health-grid">
-            <HealthCard
-              label="API"
-              status={health?.status === "ok" ? "Healthy" : "Error"}
-              icon={health?.status === "ok" ? "✓" : "✗"}
-            />
-            <HealthCard
-              label="Database"
-              status={health?.checks?.database ? "Connected" : "Error"}
-              icon={health?.checks?.database ? "✓" : "✗"}
-            />
-            <HealthCard
-              label="Redis"
-              status={health?.checks?.redis ? "Connected" : "Error"}
-              icon={health?.checks?.redis ? "✓" : "✗"}
-            />
+          <div className="status-grid">
+            <div className="status-card">
+              <p className="status-label">API</p>
+              <span className={`status-badge ${apiStatus}`}>
+                <span className="status-dot" aria-hidden="true" />
+                {apiStatus === "online" ? "Online" : "Error"}
+              </span>
+            </div>
+            <div className="status-card">
+              <p className="status-label">Database</p>
+              <span className={`status-badge ${dbStatus}`}>
+                <span className="status-dot" aria-hidden="true" />
+                {dbStatus === "online" ? "Connected" : "Error"}
+              </span>
+            </div>
+            <div className="status-card">
+              <p className="status-label">Redis</p>
+              <span className={`status-badge ${redisStatus}`}>
+                <span className="status-dot" aria-hidden="true" />
+                {redisStatus === "online" ? "Connected" : "Error"}
+              </span>
+            </div>
           </div>
         </section>
 
-        {/* Projects Section */}
-        <section className="dashboard__section">
-          <div className="dashboard__section-header">
+        {/* Recent Projects Section */}
+        <section className="dashboard__section dashboard-card">
+          <div className="dashboard__section-header" style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px'}}>
             <h2 className="dashboard__section-title">Recent Projects</h2>
             <button className="btn btn-outline btn-sm" onClick={() => window.location.assign("/projects")}>
               View All
@@ -226,18 +236,6 @@ const Dashboard: React.FC = () => {
     </div>
   );
 };
-
-function HealthCard({ label, status, icon }: { label: string; status: string; icon: string }) {
-  return (
-    <div className="health-card">
-      <span className="health-card__icon">{icon}</span>
-      <div>
-        <p className="health-card__label">{label}</p>
-        <p className="health-card__status">{status}</p>
-      </div>
-    </div>
-  );
-}
 
 function RefreshIcon() {
   return (

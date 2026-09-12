@@ -122,6 +122,8 @@ hermes-webui/
 hermes-desktop/
 
 # NexusForge specific
+node_modules/
+dist/
 data/
 logs/
 uploads/

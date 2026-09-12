@@ -51,7 +51,7 @@ const TaskDetail: React.FC = () => {
   useEffect(() => {
     if (!executionId) return;
 
-    const wsUrl = `ws://localhost:8000/api/execution/ws/${executionId}`;
+    const wsUrl = `${window.location.protocol === "https:" ? "wss:" : "ws:"}://${window.location.host}/execution/ws/${executionId}`;
     const websocket = new WebSocket(wsUrl);
     setWs(websocket);
 

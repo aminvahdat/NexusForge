@@ -58,7 +58,7 @@ class Settings(BaseSettings):
 
     # Environment
     debug: bool = Field(default=False)
-    cors_origins: List[str] = Field(default_factory=lambda: ["http://localhost:3000"])
+    cors_origins: List[str] = Field(default_factory=lambda: ["*"])
 
     model_config = {
         "env_file": ".env",

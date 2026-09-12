@@ -190,7 +190,6 @@ const TaskForm: React.FC<TaskFormProps> = ({
           type="number"
           id="task-max-retries"
           className="input"
-          type="number"
           min="0"
           max="10"
           value={formData.max_retries}

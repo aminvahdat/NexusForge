@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
-import { BrowserRouter as Router, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { BrowserRouter as Router, Route, Routes, Navigate } from "react-router-dom";
 import axios from "axios";
 import "./App.css";
-
+import ErrorBoundary from "./components/ErrorBoundary";
 import ProjectList from "./pages/ProjectList";
 import ProjectDetail from "./pages/ProjectDetail";
 import TaskList from "./pages/TaskList";
@@ -12,18 +12,58 @@ import Activity from "./pages/Activity";
 import WorkersPage from "./pages/WorkersPage";
 import WorkerDetail from "./pages/WorkerDetail";
 import Navigation from "./components/Navigation";
+import Login from "./pages/Login";
+import Register from "./pages/Register";
 
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
+const API_BASE = import.meta.env.VITE_API_BASE || "/api";
+
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      // Fast path: token present in localStorage (set by Login/Register)
+      if (localStorage.getItem("token")) {
+        try {
+          const res = await axios.get(`${API_BASE}/auth/me`, { timeout: 5000, withCredentials: true });
+          setIsAuthenticated(!!res.data.user);
+        } catch {
+          setIsAuthenticated(true); // token exists; let backend verify on real requests
+        } finally {
+          setLoading(false);
+        }
+        return;
+      }
+      try {
+        const res = await axios.get(`${API_BASE}/auth/me`, { timeout: 5000, withCredentials: true });
+        setIsAuthenticated(!!res.data.user);
+      } catch (err) {
+        setIsAuthenticated(false);
+      } finally {
+        setLoading(false);
+      }
+    };
+    checkAuth();
+  }, [API_BASE]);
+
+  if (loading) {
+    return <div className="loading-spinner" role="status">Loading...</div>;
+  }
+
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return children;
+}
 
 function App() {
-  const navigate = useNavigate();
-  const location = useLocation();
-
   // Check backend availability on app load
   useEffect(() => {
     const checkBackend = async () => {
       try {
-        const res = await axios.get(`${API_BASE}/api/health`, { timeout: 5000 });
+        const res = await axios.get(`${API_BASE}/`, { timeout: 5000 });
         console.log("Backend health check:", res.data.status);
       } catch (err) {
         console.warn("Backend unreachable:", err.message);
@@ -32,26 +72,35 @@ function App() {
     checkBackend();
   }, [API_BASE]);
 
-  // Check auth token - this is a placeholder for Phase 3 auth integration
-  const [authToken, setAuthToken] = useState<string | null>(null);
-
   return (
     <Router>
       <div className="app">
-        <Navigation />
-        
-        <main className="app__main">
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/activity" element={<Activity />} />
-            <Route path="/workers" element={<WorkersPage />} />
-            <Route path="/workers/:id" element={<WorkerDetail />} />
-            <Route path="/projects" element={<ProjectList />} />
-            <Route path="/projects/:projectId" element={<ProjectDetail />} />
-            <Route path="/tasks/:projectId" element={<TaskList />} />
-            <Route path="/projects/:projectId/tasks/:taskId" element={<TaskDetail />} />
-          </Routes>
-        </main>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+          <Route
+            path="/*"
+            element={
+              <ProtectedRoute>
+                <Navigation />
+                <main className="app__main">
+                  <ErrorBoundary>
+                    <Routes>
+                      <Route path="/" element={<Dashboard />} />
+                      <Route path="/activity" element={<Activity />} />
+                      <Route path="/workers" element={<WorkersPage />} />
+                      <Route path="/workers/:id" element={<WorkerDetail />} />
+                      <Route path="/projects" element={<ProjectList />} />
+                      <Route path="/projects/:projectId" element={<ProjectDetail />} />
+                      <Route path="/tasks/:projectId" element={<TaskList />} />
+                      <Route path="/projects/:projectId/tasks/:taskId" element={<TaskDetail />} />
+                    </Routes>
+                  </ErrorBoundary>
+                </main>
+              </ProtectedRoute>
+            }
+          />
+        </Routes>
       </div>
     </Router>
   );

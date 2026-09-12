@@ -111,7 +111,7 @@ function useShowToast(): (params: Omit<ToastProps, "id">) => string {
 }
 
 /* Toast component */
-const Toast: React.FC<ToastProps> = ({ id, title, description, severity = "info", action, timeout = 5000, closeable = true }) => {
+export const Toast: React.FC<ToastProps> = ({ id, title, description, severity = "info", action, timeout = 5000, closeable = true }) => {
   const [show, setShow] = useState(true);
   const [elapsed, setElapsed] = useState(0);
 

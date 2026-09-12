@@ -1,0 +1,36 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: nexusforge
+    ports:
+      - "5432:5432"
+    networks:
+      - nexusforge-network
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    networks:
+      - nexusforge-network
+
+  backend:
+    image: python:3.11-slim
+    working_dir: /app
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/nexusforge
+      - REDIS_URL=redis://redis:6379/0
+    command: echo "Backend would run here"
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - nexusforge-network
+
+networks:
+  nexusforge-network:

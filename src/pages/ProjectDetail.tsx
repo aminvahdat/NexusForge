@@ -2,10 +2,10 @@ import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Project, Task, TaskCreate, TaskStatus, AgentRole, Priority } from "../types";
 import { projectApi, taskApi } from "../services/api";
-import Loading from "./Loading";
-import ProjectTaskForm from "./ProjectTaskForm";
-import TaskList from "./TaskList";
-import "./ProjectDetail.css";
+import Loading from "../components/Loading";
+import ProjectTaskForm from "../components/ProjectTaskForm";
+import TaskList from "../components/TaskList";
+
 
 const ProjectDetail: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();

@@ -1,9 +1,43 @@
+// Core types and enums
+export { AgentRole, Priority, TaskStatus, ExecutionStatus } from "./enums";
+
+// Health check types
+export interface HealthCheck {
+  status: string;
+  database?: boolean;
+  redis?: boolean;
+}
+
+export interface HealthResponse {
+  status: string;
+  version?: string;
+  checks?: HealthCheck;
+}
+
+// Execution event types
+export interface ExecutionEvent {
+  id: string;
+  event_type: string;
+  execution_status?: string;
+  timestamp: string;
+  worker_id?: string;
+  execution_id?: string;
+  message?: string;
+}
+
+// WebSocket message types
+export interface WebSocketMessage {
+  type: string;
+  data?: ExecutionEvent;
+  message?: string;
+}
+
 // Approval types
 export interface ApprovalRequest {
   id: string;
   execution_id: string;
   agent_name: string;
-  agent_role: string;
+  agent_role: AgentRole;
   action_type: string;
   action_description: string;
   reasoning: string;
@@ -29,7 +63,7 @@ export interface ApprovalRequest {
 export interface ApprovalCreate {
   execution_id?: string;
   agent_name?: string;
-  agent_role?: string;
+  agent_role?: AgentRole;
   action_type: string;
   action_description: string;
   reasoning: string;
@@ -115,5 +149,148 @@ export interface ArtifactResponse {
 
 export interface ArtifactListResponse {
   artifacts: Artifact[];
+  count: number;
+}
+
+// Task types
+export interface Task {
+  id: string;
+  project_id: string;
+  title: string;
+  description: string;
+  role: AgentRole;
+  required_skills: string[];
+  dependencies: string[];
+  input_artifacts: string[];
+  output_artifacts: string[];
+  acceptance_criteria: string[];
+  priority: Priority;
+  status: TaskStatus;
+  retry_count: number;
+  max_retries: number;
+  due_date: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TaskCreate {
+  project_id: string;
+  title: string;
+  description: string;
+  role: AgentRole;
+  required_skills: string[];
+  dependencies: string[];
+  input_artifacts: string[];
+  output_artifacts: string[];
+  acceptance_criteria: string[];
+  priority: Priority;
+  status: TaskStatus;
+  retry_count: number;
+  max_retries: number;
+  due_date: string | null;
+}
+
+export interface TaskUpdate {
+  title?: string;
+  description?: string;
+  role?: AgentRole;
+  required_skills?: string[];
+  dependencies?: string[];
+  input_artifacts?: string[];
+  output_artifacts?: string[];
+  acceptance_criteria?: string[];
+  priority?: Priority;
+  status?: TaskStatus;
+  retry_count?: number;
+  max_retries?: number;
+  due_date?: string | null;
+}
+
+export interface TaskListResponse {
+  tasks: Task[];
+  count: number;
+}
+
+// Project types
+export interface Project {
+  id: string;
+  name: string;
+  description: string;
+  owner_id: string;
+  ai_provider: string | null;
+  ai_model: string | null;
+  preferred_language: string;
+  timezone: string;
+  telegram_notifications_enabled: boolean;
+  telegram_chat_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectCreate {
+  name: string;
+  description: string;
+  owner_id: string;
+  ai_provider: string | null;
+  ai_model: string | null;
+  preferred_language: string;
+  timezone: string;
+  telegram_notifications_enabled: boolean;
+  telegram_chat_id: string | null;
+}
+
+export interface ProjectUpdate {
+  name?: string;
+  description?: string;
+  owner_id?: string;
+  ai_provider?: string | null;
+  ai_model?: string | null;
+  preferred_language?: string;
+  timezone?: string;
+  telegram_notifications_enabled?: boolean;
+  telegram_chat_id?: string | null;
+}
+
+export interface ProjectListResponse {
+  projects: Project[];
+  count: number;
+}
+
+// Worker types
+export interface Worker {
+  id: string;
+  worker_id: string;
+  hostname: string;
+  status: string;
+  current_task_id: string | null;
+  last_heartbeat: string;
+  started_at: string;
+  meta_info: Record<string, any> | null;
+  execution_events: ExecutionEvent[];
+}
+
+export interface WorkerState {
+  worker_id: string;
+  hostname: string;
+  status: string;
+  current_task_id: string | null;
+  last_heartbeat: string;
+  started_at: string;
+  meta_info: Record<string, any> | null;
+}
+
+export interface WorkerControl {
+  id: string;
+  worker_id: string;
+  action: string;
+  requested_by: string;
+  requested_at: string;
+  reason: string;
+  status: string;
+  executed_at: string | null;
+}
+
+export interface WorkerListResponse {
+  workers: Worker[];
   count: number;
 }

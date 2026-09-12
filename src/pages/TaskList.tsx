@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Task, TaskCreate, TaskUpdate, TaskStatus, AgentRole, Priority } from "../types";
+import { Task, TaskCreate, TaskStatus, AgentRole, Priority } from "../types";
 import { taskApi } from "../services/api";
 import Loading from "../components/Loading";
-import "./TaskListPage.css";
 
 const TaskListPage: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
@@ -384,7 +383,6 @@ const TaskListPage: React.FC = () => {
                   type="number"
                   id="task-max-retries"
                   className="input"
-                  type="number"
                   min="0"
                   max="10"
                   value={taskFormData.max_retries}

@@ -7,7 +7,7 @@ services:
       context: .
       dockerfile: Dockerfile
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/nexusforge
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres_dev_password@postgres:5432/nexusforge
     depends_on:
       postgres:
         condition: service_healthy
@@ -29,12 +29,13 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/nexusforge
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres_dev_password@postgres:5432/nexusforge
       - REDIS_URL=redis://redis:6379/0
       - MAX_CONCURRENT_WORKERS=${MAX_CONCURRENT_WORKERS:-2}
-      - JWT_SECRET_KEY=test-secret-key-32-chars-long-enough-for-hs256
-      - SECRET_KEY=test-secret-key-32-chars-long-enough
-      - ENCRYPTION_KEY=test-encryption-key-32-bytes-base64-c3RhY2xl
+      - JWT_SECRET_KEY=dev_secret_key
+      - JWT_SECRET=dev_secret_key
+      - SECRET_KEY=dev_secret_key
+      - ENCRYPTION_KEY=dev-encryption-key-32-bytes-base64-c3RhY2xl
     depends_on:
       - postgres
       - redis
@@ -51,12 +52,13 @@ services:
       dockerfile: Dockerfile
     command: ["python", "worker.py", "--worker-id", "nexusforge-worker-01", "--hostname", "worker-01"]
     environment:
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/nexusforge
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres_dev_password@postgres:5432/nexusforge
       - REDIS_URL=redis://redis:6379/0
       - MAX_CONCURRENT_WORKERS=${MAX_CONCURRENT_WORKERS:-2}
-      - JWT_SECRET_KEY=test-secret-key-32-chars-long-enough-for-hs256
-      - SECRET_KEY=test-secret-key-32-chars-long-enough
-      - ENCRYPTION_KEY=test-encryption-key-32-bytes-base64-c3RhY2tl
+      - JWT_SECRET_KEY=dev_secret_key
+      - JWT_SECRET=dev_secret_key
+      - SECRET_KEY=dev_secret_key
+      - ENCRYPTION_KEY=dev-encryption-key-32-bytes-base64-c3RhY2xl
     depends_on:
       - postgres
       - redis
@@ -75,7 +77,7 @@ services:
       - "5432:5432"
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: postgres_dev_password
       POSTGRES_DB: nexusforge
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -102,7 +104,7 @@ services:
       timeout: 5s
       retries: 5
 
-frontend:
+  frontend:
     build:
       context: .
       dockerfile: Dockerfile.frontend

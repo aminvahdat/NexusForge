@@ -176,3 +176,4 @@ export const WorkersPage: React.FC = () => {
     </div>
   );
 };
+export default WorkersPage;

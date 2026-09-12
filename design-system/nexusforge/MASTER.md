@@ -134,3 +134,11 @@
 - --color-destructive: #DC2626
 - --color-on-destructive: #FFFFFF
 - --color-ring: #7C3AED
+
+### 12. Frontend Crash State
+- Background: `#0f172a` (`#1E1B4B` + dark) — same dark token as design
+- Error text: `#f87171` (red) — visible on dark
+- Font: Inter / monospace — match design
+- Preformatted white-space (`pre-wrap`) — stack traces readable
+- Must print `error.name`, `error.message`, `error.stack` (Safari/iOS `msg` is generic)
+- See: `references/frontend-deploy-debug.md`

@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config.settings import get_settings
 from app.db import init_database, close_database
 from app.api.health import router as health_router
+from app.api.auth import router as auth_router
 from app.api.tasks import router as tasks_router
 from app.api.execution import router as execution_router
 from app.api.approval import router as approval_router
@@ -76,7 +77,9 @@ def create_app() -> FastAPI:
     )
 
     # Health and readiness endpoints
-    app.include_router(health_router, prefix="/health", tags=["health"])
+    app.include_router(health_router, tags=["health"])
+    # Authentication endpoints
+    app.include_router(auth_router, tags=["auth"])
 
     # Project and task CRUD (Phase 2 foundation — auth added in Phase 3)
     app.include_router(tasks_router, tags=["projects", "tasks"])

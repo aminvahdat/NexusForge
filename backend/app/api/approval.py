@@ -3,7 +3,6 @@
 Phase 5.6 / Phase 6 — Human Approval System
 - Request approval for privileged actions
 - View pending approvals
-- Approve/reject/cancel approvals
 - View approval history
 - Verify agent identity and reasoning
 - Show potential risks and impact
@@ -22,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 
 from app.db import get_db_session
-from app.models.approval import ApprovalRequest
+from app.models import ApprovalRequest  # from SQLAlchemy models/__init__
 from app.schemas.approval import ApprovalCreate, ApprovalUpdate, ApprovalResponse
 from app.auth import get_current_user
 

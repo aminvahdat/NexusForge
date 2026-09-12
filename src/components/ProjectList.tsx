@@ -288,4 +288,5 @@ const ProjectList: React.FC<ProjectListProps> = ({ onProjectSelect }) => {
   );
 };
 
+export { ProjectList };
 export default ProjectList;
