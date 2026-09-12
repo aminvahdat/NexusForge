@@ -51,58 +51,71 @@ const TaskDetail: React.FC = () => {
   useEffect(() => {
     if (!executionId) return;
 
-    const wsUrl = `${window.location.protocol === "https:" ? "wss:" : "ws:"}://${window.location.host}/execution/ws/${executionId}`;
-    const websocket = new WebSocket(wsUrl);
-    setWs(websocket);
+    let websocket: WebSocket | null = null;
+    try {
+      const wsProto = window.location.protocol === "https:" ? "wss" : "ws";
+      const wsUrl = `${wsProto}://${window.location.host}/execution/ws/${executionId}`;
+      websocket = new WebSocket(wsUrl);
+      setWs(websocket);
 
-    websocket.onopen = () => {
-      setWsConnected(true);
-      setWsReconnecting(false);
-      console.log("WebSocket connected for execution", executionId);
-    };
+      websocket.onopen = () => {
+        setWsConnected(true);
+        setWsReconnecting(false);
+        console.log("WebSocket connected for execution", executionId);
+      };
 
-    websocket.onmessage = (event) => {
-      try {
-        const msg: WebSocketMessage = JSON.parse(event.data);
-        if (msg.type === "execution_event" && msg.event) {
-          setExecutionEvents((prev) => {
-            // Prevent duplicates by event timestamp + type
-            const exists = prev.some(
-              (e) =>
-                e.event_type === msg.event.event_type &&
-                e.timestamp === msg.event.timestamp
-            );
-            if (exists) return prev;
-            return [...prev, msg.event];
-          });
-        } else if (msg.type === "state_sync") {
-          // Handle initial state sync
+      websocket.onmessage = (event) => {
+        try {
+          const msg: WebSocketMessage = JSON.parse(event.data);
+          if (msg.type === "execution_event" && msg.event) {
+            setExecutionEvents((prev) => {
+              // Prevent duplicates by event timestamp + type
+              const exists = prev.some(
+                (e) =>
+                  e.event_type === msg.event.event_type &&
+                  e.timestamp === msg.event.timestamp
+              );
+              if (exists) return prev;
+              return [...prev, msg.event];
+            });
+          } else if (msg.type === "state_sync") {
+            // Handle initial state sync
+          }
+        } catch (e) {
+          console.warn("Failed to parse WebSocket message:", e);
         }
-      } catch (e) {
-        console.warn("Failed to parse WebSocket message:", e);
-      }
-    };
+      };
 
-    websocket.onerror = (err) => {
-      console.error("WebSocket error:", err);
-      setWsConnected(false);
-    };
+      websocket.onerror = (err) => {
+        console.error("WebSocket error:", err);
+        setWsConnected(false);
+      };
 
-    websocket.onclose = () => {
-      console.log("WebSocket disconnected");
+      websocket.onclose = () => {
+        console.log("WebSocket disconnected");
+        setWsConnected(false);
+        // Auto reconnect after a short delay
+        setWsReconnecting(true);
+        setTimeout(() => {
+          if (executionId) {
+            setWsReconnecting(false);
+            // Reconnect handled by effect re-run if executionId changes
+          }
+        }, 2000);
+      };
+    } catch (err) {
+      console.warn("Failed to connect WebSocket for execution:", err);
       setWsConnected(false);
-      // Auto reconnect after a short delay
-      setWsReconnecting(true);
-      setTimeout(() => {
-        if (executionId) {
-          setWsReconnecting(false);
-          // Reconnect handled by effect re-run if executionId changes
-        }
-      }, 2000);
-    };
+    }
 
     return () => {
-      websocket.close();
+      if (websocket) {
+        try {
+          websocket.close();
+        } catch {
+          // ignore
+        }
+      }
       setWs(null);
     };
   }, [executionId]);

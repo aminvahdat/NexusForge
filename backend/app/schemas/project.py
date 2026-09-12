@@ -17,6 +17,7 @@ class ProjectBase(BaseModel):
     timezone: str = Field(default="UTC", description="Timezone")
     telegram_notifications_enabled: bool = Field(default=False, description="Enable Telegram notifications")
     telegram_chat_id: Optional[str] = Field(None, description="Telegram chat ID")
+    workspace_path: Optional[str] = Field(None, description="Custom workspace directory path")
 
     class Config:
         from_attributes = True
@@ -25,7 +26,7 @@ class ProjectBase(BaseModel):
 class ProjectCreate(ProjectBase):
     """Schema for creating a project."""
 
-    owner_id: str = Field(..., description="Owner user ID")
+    owner_id: Optional[str] = Field(default=None, description="Owner user ID")
 
 
 class ProjectUpdate(BaseModel):
@@ -39,6 +40,7 @@ class ProjectUpdate(BaseModel):
     timezone: Optional[str] = None
     telegram_notifications_enabled: Optional[bool] = None
     telegram_chat_id: Optional[str] = None
+    workspace_path: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -71,6 +73,7 @@ def project_from_model(model: ProjectModel) -> ProjectResponse:
         timezone=model.timezone,
         telegram_notifications_enabled=model.telegram_notifications_enabled,
         telegram_chat_id=model.telegram_chat_id,
+        workspace_path=getattr(model, "workspace_path", None),
         created_at=model.created_at,
         updated_at=model.updated_at,
     )

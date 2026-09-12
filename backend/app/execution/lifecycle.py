@@ -6,15 +6,19 @@ from app.execution.events import Event, EventType
 class ExecutionLifecycle:
     @staticmethod
     def transition(state: ExecutionState, new_status: ExecutionStatus, message: str) -> Event:
-        previous = state.status.value
-        state.status = new_status
+        prev_val = state.status.value if hasattr(state.status, "value") else str(state.status)
+        new_val = new_status.value if hasattr(new_status, "value") else str(new_status)
+        try:
+            state.status = ExecutionStatus(new_val)
+        except Exception:
+            state.status = new_status
         event = Event(
             event_type=EventType.EXECUTION_PROGRESS,
-            message=f"{message} ({previous} → {new_status.value})",
+            message=f"{message} ({prev_val} → {new_val})",
             execution_id=state.execution_id,
             worker_id=state.worker_id,
             task_id=state.task_id,
-            metadata={"previous_status": previous, "new_status": new_status.value},
+            metadata={"previous_status": prev_val, "new_status": new_val},
         )
         state.events.append(event)
         return event

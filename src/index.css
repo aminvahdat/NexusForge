@@ -1,5 +1,5 @@
 /* NexusForge Design System - Global Styles */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Vazirmatn:wght@300;400;500;600;700;800&display=swap');
 
 /* Design System Tokens */
 :root {
@@ -17,8 +17,8 @@
   --color-warning: #F59E0B;
 
   /* Font families */
-  --font-family-primary: 'Inter', system-ui, sans-serif;
-  --font-family-mono: 'JetBrains Mono', Menlo, monospace;
+  --font-family-primary: 'Vazirmatn', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-family-mono: 'JetBrains Mono', Menlo, Consolas, monospace;
 
   /* Base typography */
   --font-size-base: 16px;
@@ -243,3 +243,36 @@ a:hover {
 .safe-area-top {
   padding-top: max(16px, env(safe-area-inset-top));
 }
+
+/* RTL Layout Adjustments */
+html[dir="rtl"],
+body.rtl-layout {
+  direction: rtl;
+  text-align: right;
+  font-family: 'Vazirmatn', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+}
+
+html[dir="rtl"] .app {
+  flex-direction: row-reverse;
+}
+
+html[dir="rtl"] .navigation {
+  border-right: none;
+  border-left: 1px solid var(--color-border-subtle);
+}
+
+html[dir="rtl"] .navigation__icon {
+  margin-right: 0;
+  margin-left: 0.75rem;
+}
+
+html[dir="rtl"] .btn__icon {
+  margin-right: 0;
+  margin-left: 0.5rem;
+}
+
+html[dir="rtl"] input,
+html[dir="rtl"] textarea,
+html[dir="rtl"] select {
+  text-align: right;
+}

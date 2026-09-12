@@ -14,6 +14,9 @@ import WorkerDetail from "./pages/WorkerDetail";
 import Navigation from "./components/Navigation";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
+import Settings from "./pages/Settings";
+import AgentsPage from "./pages/AgentsPage";
+import { LanguageProvider } from "./context/LanguageContext";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "/api";
 
@@ -73,36 +76,40 @@ function App() {
   }, [API_BASE]);
 
   return (
-    <Router>
-      <div className="app">
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
-          <Route
-            path="/*"
-            element={
-              <ProtectedRoute>
-                <Navigation />
-                <main className="app__main">
-                  <ErrorBoundary>
-                    <Routes>
-                      <Route path="/" element={<Dashboard />} />
-                      <Route path="/activity" element={<Activity />} />
-                      <Route path="/workers" element={<WorkersPage />} />
-                      <Route path="/workers/:id" element={<WorkerDetail />} />
-                      <Route path="/projects" element={<ProjectList />} />
-                      <Route path="/projects/:projectId" element={<ProjectDetail />} />
-                      <Route path="/tasks/:projectId" element={<TaskList />} />
-                      <Route path="/projects/:projectId/tasks/:taskId" element={<TaskDetail />} />
-                    </Routes>
-                  </ErrorBoundary>
-                </main>
-              </ProtectedRoute>
-            }
-          />
-        </Routes>
-      </div>
-    </Router>
+    <LanguageProvider>
+      <Router>
+        <div className="app">
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/register" element={<Register />} />
+            <Route
+              path="/*"
+              element={
+                <ProtectedRoute>
+                  <Navigation />
+                  <main className="app__main">
+                    <ErrorBoundary>
+                      <Routes>
+                        <Route path="/" element={<Dashboard />} />
+                        <Route path="/activity" element={<Activity />} />
+                        <Route path="/settings" element={<Settings />} />
+                        <Route path="/agents" element={<AgentsPage />} />
+                        <Route path="/workers" element={<WorkersPage />} />
+                        <Route path="/workers/:id" element={<WorkerDetail />} />
+                        <Route path="/projects" element={<ProjectList />} />
+                        <Route path="/projects/:projectId" element={<ProjectDetail />} />
+                        <Route path="/tasks/:projectId" element={<TaskList />} />
+                        <Route path="/projects/:projectId/tasks/:taskId" element={<TaskDetail />} />
+                      </Routes>
+                    </ErrorBoundary>
+                  </main>
+                </ProtectedRoute>
+              }
+            />
+          </Routes>
+        </div>
+      </Router>
+    </LanguageProvider>
   );
 }
 

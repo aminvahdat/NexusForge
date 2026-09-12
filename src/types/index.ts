@@ -216,6 +216,7 @@ export interface Project {
   id: string;
   name: string;
   description: string;
+  status?: string;
   owner_id: string;
   ai_provider: string | null;
   ai_model: string | null;
@@ -223,6 +224,7 @@ export interface Project {
   timezone: string;
   telegram_notifications_enabled: boolean;
   telegram_chat_id: string | null;
+  workspace_path?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -230,13 +232,29 @@ export interface Project {
 export interface ProjectCreate {
   name: string;
   description: string;
-  owner_id: string;
-  ai_provider: string | null;
-  ai_model: string | null;
-  preferred_language: string;
-  timezone: string;
-  telegram_notifications_enabled: boolean;
-  telegram_chat_id: string | null;
+  owner_id?: string;
+  status?: string;
+  ai_provider?: string | null;
+  ai_model?: string | null;
+  preferred_language?: string;
+  timezone?: string;
+  telegram_notifications_enabled?: boolean;
+  telegram_chat_id?: string | null;
+  workspace_path?: string | null;
+}
+
+export interface AgentTrace {
+  role: string;
+  agent_name: string;
+  badge: string;
+  status: string;
+  duration?: string;
+  model?: string;
+  thoughts: string[];
+  output_title: string;
+  output_type: string;
+  output_content: string;
+  file_path?: string;
 }
 
 export interface ProjectUpdate {
@@ -294,3 +312,26 @@ export interface WorkerListResponse {
   workers: Worker[];
   count: number;
 }
+
+export interface ProjectMessage {
+  id: string;
+  project_id: string;
+  sender: 'user' | 'hermes' | 'system';
+  content: string;
+  metadata?: {
+    type?: string;
+    quick_chips?: string[];
+    models?: Record<string, any>;
+    trigger_build?: boolean;
+    [key: string]: any;
+  };
+  created_at: string;
+}
+
+export interface WorkspaceFile {
+  path: string;
+  name: string;
+  size: number;
+  modified: string;
+  ext: string;
+}

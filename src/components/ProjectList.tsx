@@ -73,9 +73,17 @@ const ProjectList: React.FC<ProjectListProps> = ({ onProjectSelect }) => {
       setLoading(true);
       setError(null);
       const data = await projectApi.getAll();
-      setProjects(data);
+      const list = Array.isArray(data)
+        ? data
+        : Array.isArray((data as any)?.projects)
+        ? (data as any).projects
+        : Array.isArray((data as any)?.items)
+        ? (data as any).items
+        : [];
+      setProjects(list);
     } catch (err: any) {
       setError(err.detail || "Failed to load projects");
+      setProjects([]);
     } finally {
       setLoading(false);
     }
@@ -149,7 +157,7 @@ const ProjectList: React.FC<ProjectListProps> = ({ onProjectSelect }) => {
         </div>
       )}
 
-      {projects.length === 0 && !error && (
+      {(projects || []).length === 0 && !error && (
         <div className="empty-state">
           <svg className="empty-state__icon" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M21 19V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2z"></path>
@@ -164,9 +172,9 @@ const ProjectList: React.FC<ProjectListProps> = ({ onProjectSelect }) => {
         </div>
       )}
 
-      {projects.length > 0 && (
+      {(projects || []).length > 0 && (
         <div className="project-list__grid" role="list">
-          {projects.map((project) => (
+          {(projects || []).map((project) => (
             <ProjectCard
               key={project.id}
               project={project}

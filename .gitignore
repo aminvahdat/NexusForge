@@ -129,6 +129,15 @@ logs/
 uploads/
 temp/
 *.backup
+*.db
+*.sqlite
+*.sqlite3
+nexusforge.db
+backend/nexusforge.db
+scratch/
+bin/
+workspaces/*
+!workspaces/.gitkeep
 
 # Docker
 .dockerignore

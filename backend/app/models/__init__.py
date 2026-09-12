@@ -90,11 +90,13 @@ class Project(Base):
     timezone = Column(String(50), default='UTC')
     telegram_notifications_enabled = Column(Boolean, default=False)
     telegram_chat_id = Column(String(100), nullable=True)
+    workspace_path = Column(String(500), nullable=True)
 
     owner = relationship('User', back_populates='projects')
     tasks = relationship('Task', back_populates='project')
     artifacts = relationship('Artifact', back_populates='project')
     memory = relationship('ProjectMemory', back_populates='project', uselist=False)
+    messages = relationship('ProjectMessage', back_populates='project', cascade='all, delete-orphan')
 
     __table_args__ = (
         Index('ix_projects_owner_created', owner_id, created_at),
@@ -117,6 +119,7 @@ class Project(Base):
             'timezone': self.timezone,
             'telegram_notifications_enabled': self.telegram_notifications_enabled,
             'telegram_chat_id': self.telegram_chat_id,
+            'workspace_path': self.workspace_path,
         }
 
     def __repr__(self):
@@ -576,3 +579,34 @@ class WorkerControl(Base):
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'meta_info': self.meta_info,
         }
+
+
+class ProjectMessage(Base):
+    """Project message model for conversational Hermes agent interactions."""
+    __tablename__ = 'project_messages'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey('projects.id'), nullable=False, index=True)
+    sender = Column(String(50), nullable=False)  # 'user', 'hermes', 'system'
+    content = Column(Text, nullable=False)
+    metadata_json = Column(JSON, default=dict)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    project = relationship('Project', back_populates='messages')
+
+    __table_args__ = (
+        Index('ix_project_messages_created_at', project_id, created_at),
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            'id': str(self.id),
+            'project_id': str(self.project_id),
+            'sender': self.sender,
+            'content': self.content,
+            'metadata': self.metadata_json or {},
+            'created_at': self.created_at.isoformat(),
+        }
+
+    def __repr__(self):
+        return f'<ProjectMessage {self.sender}: {self.content[:30]}>'

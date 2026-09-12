@@ -65,10 +65,10 @@ def get_current_user(token: Optional[str] = Depends(oauth2_scheme)) -> Optional[
         user_id = payload.get("sub")
         if not user_id:
             return None
-        # In real implementation, query database
+        email = payload.get("email") or (user_id if "@" in str(user_id) else "admin@nexusforge.io")
         return User(
             id=user_id,
-            email=payload.get("email", "unknown@example.com"),
+            email=email,
             password_hash="",
             is_active=True,
             is_superuser=payload.get("is_superuser", False),

@@ -12,11 +12,12 @@ class TaskBase(BaseModel):
 
     title: str = Field(..., max_length=500, description="Task title")
     description: str = Field(..., description="Detailed task description")
-    role: str = Field(..., description="Agent role assigned to this task")
+    role: Optional[str] = Field(default="chief_orchestrator", description="Agent role assigned to this task")
     required_skills: List[str] = Field(default_factory=list, description="Required agent skills")
     dependencies: List[str] = Field(default_factory=list, description="Task dependency IDs")
-    input_artifacts: List[str] = Field(default_factory=list, description="Input artifact IDs")
-    acceptance_criteria: List[str] = Field(default_factory=list, description="Acceptance criteria")
+    input_artifacts: List[Any] = Field(default_factory=list, description="Input artifact IDs or objects")
+    output_artifacts: List[Any] = Field(default_factory=list, description="Output artifact IDs or objects")
+    acceptance_criteria: List[Any] = Field(default_factory=list, description="Acceptance criteria")
 
     class Config:
         from_attributes = True
@@ -26,7 +27,7 @@ class TaskCreate(TaskBase):
     """Schema for creating a task."""
 
     task_id: Optional[str] = Field(None, description="Custom task ID (optional)")
-    project_id: str = Field(..., description="Project ID")
+    project_id: Optional[str] = Field(None, description="Project ID")
     priority: str = Field(default=Priority.MEDIUM.value, description="Task priority")
     status: str = Field(default=TaskStatus.QUEUED.value, description="Initial task status")
     retry_count: int = Field(default=0, ge=0, description="Current retry count")
@@ -42,9 +43,9 @@ class TaskUpdate(BaseModel):
     role: Optional[str] = None
     required_skills: Optional[List[str]] = None
     dependencies: Optional[List[str]] = None
-    input_artifacts: Optional[List[str]] = None
-    output_artifacts: Optional[List[str]] = None
-    acceptance_criteria: Optional[List[str]] = None
+    input_artifacts: Optional[List[Any]] = None
+    output_artifacts: Optional[List[Any]] = None
+    acceptance_criteria: Optional[List[Any]] = None
     priority: Optional[str] = None
     status: Optional[str] = None
     assigned_worker: Optional[str] = None
@@ -72,7 +73,7 @@ class TaskResponse(TaskBase):
     updated_at: datetime = Field(..., description="Last update timestamp")
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
-    output_artifacts: List[str] = Field(default_factory=list)
+    output_artifacts: List[Any] = Field(default_factory=list)
     error: Optional[str] = None
     metadata: dict = Field(default_factory=dict)
     estimated_tokens: Optional[int] = None

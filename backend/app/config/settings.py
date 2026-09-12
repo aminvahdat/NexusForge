@@ -77,8 +77,8 @@ class Settings(BaseSettings):
     @field_validator('database_url')
     @classmethod
     def validate_database_url(cls, v: str) -> str:
-        if not v.startswith(('postgresql+asyncpg://', 'postgresql+asyncpg://')):
-            raise ValueError('DATABASE_URL must use postgresql+asyncpg:// scheme')
+        if not v.startswith(('postgresql+asyncpg://', 'sqlite+aiosqlite://')):
+            raise ValueError('DATABASE_URL must use postgresql+asyncpg:// or sqlite+aiosqlite:// scheme')
         return v
 
     @field_validator('redis_url')

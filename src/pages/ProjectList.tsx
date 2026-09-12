@@ -1,13 +1,21 @@
-import React, { useState, useEffect } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import React, { useState, useEffect, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { Project, ProjectCreate } from "../types";
 import { projectApi } from "../services/api";
+import { useLanguage } from "../context/LanguageContext";
 import Loading from "../components/Loading";
+import "./ProjectList.css";
+
+type TabType = "active" | "archived" | "all";
 
 const ProjectListPage: React.FC = () => {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<TabType>("active");
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // Create Project Modal
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [createLoading, setCreateLoading] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -15,24 +23,41 @@ const ProjectListPage: React.FC = () => {
     name: "",
     description: "",
     owner_id: "current-user",
-    ai_provider: null,
-    ai_model: null,
-    preferred_language: "en",
+    ai_provider: "anthropic",
+    ai_model: "claude-3-7-sonnet-latest",
+    preferred_language: "fa",
     timezone: "UTC",
     telegram_notifications_enabled: false,
     telegram_chat_id: null,
+    workspace_path: "",
   });
 
+  // Delete Confirmation Modal
+  const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+
+  // Action Loading states (by project id)
+  const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
+
   const navigate = useNavigate();
+  const { t, lang, isRTL } = useLanguage();
 
   const fetchProjects = async () => {
     try {
       setLoading(true);
       setError(null);
       const data = await projectApi.getAll();
-      setProjects(data);
+      const list = Array.isArray(data)
+        ? data
+        : Array.isArray((data as any)?.projects)
+        ? (data as any).projects
+        : Array.isArray((data as any)?.items)
+        ? (data as any).items
+        : [];
+      setProjects(list);
     } catch (err: any) {
-      setError(err.detail || "Failed to load projects");
+      setError(err.detail || t("common.error"));
+      setProjects([]);
     } finally {
       setLoading(false);
     }
@@ -44,233 +69,430 @@ const ProjectListPage: React.FC = () => {
 
   const handleCreateProject = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!newProject.name.trim()) return;
+
     try {
       setCreateLoading(true);
       setCreateError(null);
-      const project = await projectApi.create(newProject);
+      const created = await projectApi.create(newProject);
       setShowCreateModal(false);
-      setNewProject({
-        name: "",
-        description: "",
-        owner_id: "current-user",
-        ai_provider: null,
-        ai_model: null,
-        preferred_language: "en",
-        timezone: "UTC",
-        telegram_notifications_enabled: false,
-        telegram_chat_id: null,
-      });
-      fetchProjects();
+      try {
+        await projectApi.run(created.id);
+      } catch (runErr) {
+        console.warn("Auto-run trigger:", runErr);
+      }
+      navigate(`/projects/${created.id}`);
     } catch (err: any) {
-      setCreateError(err.detail || "Failed to create project");
+      setCreateError(err.detail || t("common.error"));
     } finally {
       setCreateLoading(false);
     }
   };
 
-  const handleInputChange = (field: keyof ProjectCreate, value: any) => {
-    setNewProject((prev) => ({ ...prev, [field]: value }));
+  const handleToggleArchive = async (e: React.MouseEvent, project: Project) => {
+    e.stopPropagation();
+    try {
+      setActionLoadingId(project.id);
+      if (project.status === "archived") {
+        await projectApi.unarchive(project.id);
+      } else {
+        await projectApi.archive(project.id);
+      }
+      await fetchProjects();
+    } catch (err: any) {
+      alert(err.detail || "Failed to update project archive status");
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!projectToDelete) return;
+    try {
+      setDeleteLoading(true);
+      await projectApi.delete(projectToDelete.id);
+      setProjectToDelete(null);
+      await fetchProjects();
+    } catch (err: any) {
+      alert(err.detail || "Failed to delete project");
+    } finally {
+      setDeleteLoading(false);
+    }
   };
 
   const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleDateString(lang === "fa" ? "fa-IR" : "en-US", {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      });
+    } catch {
+      return dateString;
+    }
   };
 
+  // Filtered lists
+  const counts = useMemo(() => {
+    const active = projects.filter((p) => p.status !== "archived").length;
+    const archived = projects.filter((p) => p.status === "archived").length;
+    return { active, archived, all: projects.length };
+  }, [projects]);
+
+  const filteredProjects = useMemo(() => {
+    return projects.filter((p) => {
+      // Tab filter
+      if (activeTab === "active" && p.status === "archived") return false;
+      if (activeTab === "archived" && p.status !== "archived") return false;
+
+      // Search query filter
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const matchName = (p.name || "").toLowerCase().includes(q);
+        const matchDesc = (p.description || "").toLowerCase().includes(q);
+        return matchName || matchDesc;
+      }
+      return true;
+    });
+  }, [projects, activeTab, searchQuery]);
+
   if (loading) {
-    return <Loading message="Loading projects..." />;
+    return <Loading message={t("common.loading")} />;
   }
 
   return (
-    <div className="page page--projects">
-      <header className="page__header">
-        <div className="page__title-section">
-          <h1 className="page__title">Projects</h1>
-          <p className="page__subtitle">
-            Manage your AI development projects
-          </p>
+    <div className="projects-page">
+      {/* Header */}
+      <header className="projects-header">
+        <div className="projects-header__title-group">
+          <h1>{t("projects.title")}</h1>
+          <p>{t("projects.subtitle")}</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowCreateModal(true)}>
-          <svg className="btn__icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <line x1="12" y1="5" x2="12" y2="19"></line>
-            <line x1="5" y1="12" x2="19" y2="12"></line>
-          </svg>
-          New Project
-        </button>
+        <div className="projects-header__actions">
+          <button className="btn-new-project" onClick={() => setShowCreateModal(true)}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+            <span>{t("projects.new_btn")}</span>
+          </button>
+        </div>
       </header>
 
+      {/* Controls Bar: Tabs & Search */}
+      <div className="projects-controls">
+        <div className="projects-tabs">
+          <button
+            className={`projects-tab-btn ${activeTab === "active" ? "projects-tab-btn--active" : ""}`}
+            onClick={() => setActiveTab("active")}
+          >
+            <span>{t("projects.tab_active")}</span>
+            <span className="projects-tab-badge">{counts.active}</span>
+          </button>
+          <button
+            className={`projects-tab-btn ${activeTab === "archived" ? "projects-tab-btn--active" : ""}`}
+            onClick={() => setActiveTab("archived")}
+          >
+            <span>{t("projects.tab_archived")}</span>
+            <span className="projects-tab-badge">{counts.archived}</span>
+          </button>
+          <button
+            className={`projects-tab-btn ${activeTab === "all" ? "projects-tab-btn--active" : ""}`}
+            onClick={() => setActiveTab("all")}
+          >
+            <span>{t("projects.tab_all")}</span>
+            <span className="projects-tab-badge">{counts.all}</span>
+          </button>
+        </div>
+
+        <div className="projects-search-box">
+          <svg className="projects-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input
+            type="text"
+            className="projects-search-input"
+            placeholder={t("projects.search_placeholder")}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+        </div>
+      </div>
+
       {error && (
-        <div className="alert alert-error" role="alert">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="12" cy="12" r="10"></circle>
-            <line x1="12" y1="8" x2="12" y2="12"></line>
-            <line x1="12" y1="16" x2="12.01" y2="16"></line>
-          </svg>
+        <div className="alert alert-error" role="alert" style={{ marginBottom: "1.5rem" }}>
           <span>{error}</span>
-          <button className="alert__dismiss" onClick={() => { setError(null); fetchProjects(); }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="18" y1="6" x2="6" y2="18"></line>
-              <line x1="6" y1="6" x2="18" y2="18"></line>
-            </svg>
-          </button>
+          <button className="alert__dismiss" onClick={() => { setError(null); fetchProjects(); }}>✕</button>
         </div>
       )}
 
-      {projects.length === 0 && !error && (
-        <div className="empty-state">
-          <svg className="empty-state__icon" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <path d="M22 19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l2 3h9a2 2 0 0 1 2 2v11z"></path>
-          </svg>
-          <h2 className="empty-state__title">No Projects Yet</h2>
-          <p className="empty-state__description">
-            Create your first project to start building with NexusForge.
-          </p>
-          <button className="btn btn-primary empty-state__action" onClick={() => setShowCreateModal(true)}>
-            Create Project
+      {/* Projects Grid or Empty State */}
+      {filteredProjects.length === 0 ? (
+        <div className="projects-empty-state">
+          <div className="projects-empty-icon">📁</div>
+          <h3>{t("projects.empty_title")}</h3>
+          <p>{t("projects.empty_desc")}</p>
+          <button className="btn-new-project" onClick={() => setShowCreateModal(true)}>
+            {t("projects.new_btn")}
           </button>
         </div>
-      )}
+      ) : (
+        <div className="projects-grid">
+          {filteredProjects.map((project) => {
+            const isArchived = project.status === "archived";
+            const isActionBusy = actionLoadingId === project.id;
 
-      {projects.length > 0 && (
-        <div className="page__grid" role="list">
-          {(projects || []).map((project) => (
-            <article
-              key={project.id}
-              className="page__card"
-              onClick={() => navigate(`/projects/${project.id}`)}
-              tabIndex={0}
-              role="listitem"
-            >
-              <header className="page__card-header">
-                <h3 className="page__card-name">{project.name}</h3>
-                <span className="page__card-status">{project.status}</span>
-              </header>
-              <p className="page__card-description">
-                {project.description || "No description provided"}
-              </p>
-              <footer className="page__card-footer">
-                <div className="page__card-meta">
-                  <span className="page__card-meta-item">
-                    <span className="page__card-meta-label">Created</span>
-                    <span className="page__card-meta-value">{formatDate(project.created_at)}</span>
+            return (
+              <article
+                key={project.id}
+                className={`project-card ${isArchived ? "project-card--archived" : ""}`}
+                onClick={() => navigate(`/projects/${project.id}`)}
+                tabIndex={0}
+              >
+                <header className="project-card__header">
+                  <h2 className="project-card__title">{project.name}</h2>
+                  <span
+                    className={`project-status-pill ${
+                      isArchived ? "project-status-pill--archived" : "project-status-pill--active"
+                    }`}
+                  >
+                    {isArchived ? t("projects.status_archived") : t("projects.status_active")}
                   </span>
-                  <span className="page__card-meta-item">
-                    <span className="page__card-meta-label">Owner</span>
-                    <span className="page__card-meta-value">{project.owner_id.slice(0, 8)}...</span>
-                  </span>
+                </header>
+
+                <div className="project-card__body">
+                  <p className="project-card__desc">
+                    {project.description || (lang === "fa" ? "بدون توضیحات ثبت‌شده" : "No description provided")}
+                  </p>
+
+                  <div className="project-card__tags">
+                    {project.preferred_language && (
+                      <span className="project-card-tag" title={t("projects.badge_lang")}>
+                        <span className="project-card-tag__icon">🌐</span>
+                        <span>{project.preferred_language === "fa" ? "فارسی" : "English"}</span>
+                      </span>
+                    )}
+                    {project.ai_provider && (
+                      <span className="project-card-tag" title={t("projects.badge_provider")}>
+                        <span className="project-card-tag__icon">⚡</span>
+                        <span style={{ textTransform: "capitalize" }}>{project.ai_provider}</span>
+                      </span>
+                    )}
+                    {project.ai_model && (
+                      <span className="project-card-tag" title={t("projects.badge_model")}>
+                        <span className="project-card-tag__icon">🧠</span>
+                        <span>{project.ai_model}</span>
+                      </span>
+                    )}
+                  </div>
                 </div>
-              </footer>
-            </article>
-          ))}
+
+                <footer className="project-card__footer" onClick={(e) => e.stopPropagation()}>
+                  <div className="project-card__meta-date">
+                    <span>{t("projects.created_at")} {formatDate(project.created_at)}</span>
+                  </div>
+
+                  <div className="project-card__actions">
+                    {/* Archive / Unarchive Button */}
+                    <button
+                      type="button"
+                      className="btn-card-action"
+                      disabled={isActionBusy}
+                      onClick={(e) => handleToggleArchive(e, project)}
+                      title={isArchived ? t("projects.action_unarchive") : t("projects.action_archive")}
+                    >
+                      {isArchived ? (
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <polyline points="9 11 12 14 22 4"></polyline>
+                          <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+                        </svg>
+                      ) : (
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <polyline points="21 8 21 21 3 21 3 8"></polyline>
+                          <rect x="1" y="3" width="22" height="5"></rect>
+                          <line x1="10" y1="12" x2="14" y2="12"></line>
+                        </svg>
+                      )}
+                    </button>
+
+                    {/* Delete Button */}
+                    <button
+                      type="button"
+                      className="btn-card-action btn-card-action--danger"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setProjectToDelete(project);
+                      }}
+                      title={t("projects.action_delete")}
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        <line x1="10" y1="11" x2="10" y2="17"></line>
+                        <line x1="14" y1="11" x2="14" y2="17"></line>
+                      </svg>
+                    </button>
+
+                    {/* Open Project CTA */}
+                    <button
+                      type="button"
+                      className="btn-card-open"
+                      onClick={() => navigate(`/projects/${project.id}`)}
+                    >
+                      {t("projects.action_open")} →
+                    </button>
+                  </div>
+                </footer>
+              </article>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {projectToDelete && (
+        <div className="modal-overlay" onClick={() => setProjectToDelete(null)}>
+          <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
+            <header className="modal-dialog__header">
+              <h3>{t("projects.delete_confirm_title")}</h3>
+              <button className="modal-dialog__close-btn" onClick={() => setProjectToDelete(null)}>✕</button>
+            </header>
+            <div className="modal-dialog__body">
+              <p style={{ color: "#F0F4F8", fontWeight: 600, marginBottom: "0.5rem" }}>
+                «{projectToDelete.name}»
+              </p>
+              <p style={{ color: "#8E95A5", fontSize: "0.9rem", lineHeight: 1.5 }}>
+                {t("projects.delete_confirm_desc")}
+              </p>
+            </div>
+            <footer className="modal-dialog__footer">
+              <button
+                type="button"
+                className="btn-secondary"
+                disabled={deleteLoading}
+                onClick={() => setProjectToDelete(null)}
+              >
+                {t("common.cancel")}
+              </button>
+              <button
+                type="button"
+                className="btn-danger"
+                disabled={deleteLoading}
+                onClick={handleDeleteConfirm}
+              >
+                {deleteLoading ? t("common.loading") : t("projects.action_delete")}
+              </button>
+            </footer>
+          </div>
         </div>
       )}
 
       {/* Create Project Modal */}
       {showCreateModal && (
-        <div className="modal-overlay" onClick={() => setShowCreateModal(false)} role="dialog" aria-modal="true" aria-labelledby="create-project-title">
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <header className="modal__header">
-              <h2 id="create-project-title" className="modal__title">Create New Project</h2>
-              <button className="modal__close" onClick={() => setShowCreateModal(false)} aria-label="Close">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="18" y1="6" x2="6" y2="18"></line>
-                  <line x1="6" y1="6" x2="18" y2="18"></line>
-                </svg>
-              </button>
+        <div className="modal-overlay" onClick={() => setShowCreateModal(false)}>
+          <div className="modal-dialog" style={{ maxWidth: "560px" }} onClick={(e) => e.stopPropagation()}>
+            <header className="modal-dialog__header">
+              <h3>{t("modal.create_project_title")}</h3>
+              <button className="modal-dialog__close-btn" onClick={() => setShowCreateModal(false)}>✕</button>
             </header>
-            <form onSubmit={handleCreateProject} className="modal__body" noValidate>
-              {createError && (
-                <div className="alert alert-error" role="alert">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <circle cx="12" cy="12" r="10"></circle>
-                    <line x1="12" y1="8" x2="12" y2="12"></line>
-                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
-                  </svg>
-                  <span>{createError}</span>
+            <form onSubmit={handleCreateProject}>
+              <div className="modal-dialog__body">
+                {createError && (
+                  <div className="alert alert-error" style={{ marginBottom: "1rem" }}>
+                    <span>{createError}</span>
+                  </div>
+                )}
+
+                <div className="form-group" style={{ marginBottom: "1.2rem" }}>
+                  <label className="label">{t("modal.project_name")} *</label>
+                  <input
+                    type="text"
+                    className="input"
+                    required
+                    placeholder={lang === "fa" ? "مثال: سامانه پرداخت کریپتو" : "e.g. Autonomous Payment Gateway"}
+                    value={newProject.name}
+                    onChange={(e) => setNewProject({ ...newProject, name: e.target.value })}
+                  />
                 </div>
-              )}
 
-              <div className="form-group">
-                <label htmlFor="project-name" className="label">Project Name *</label>
-                <input
-                  type="text"
-                  id="project-name"
-                  className="input"
-                  value={newProject.name}
-                  onChange={(e) => handleInputChange("name", e.target.value)}
-                  required
-                  placeholder="My AI Project"
-                  autoFocus
-                />
+                <div className="form-group" style={{ marginBottom: "1.2rem" }}>
+                  <label className="label">{t("modal.project_desc")}</label>
+                  <textarea
+                    className="input"
+                    rows={3}
+                    placeholder={lang === "fa" ? "شرح معماری، اهداف و تکنولوژی‌های مورد نیاز..." : "Describe goals, architecture, tech stack..."}
+                    value={newProject.description}
+                    onChange={(e) => setNewProject({ ...newProject, description: e.target.value })}
+                  />
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", marginBottom: "1.2rem" }}>
+                  <div className="form-group">
+                    <label className="label">{t("modal.ai_provider")}</label>
+                    <select
+                      className="input"
+                      value={newProject.ai_provider || "anthropic"}
+                      onChange={(e) => setNewProject({ ...newProject, ai_provider: e.target.value })}
+                    >
+                      <option value="anthropic">Anthropic (Claude 3.7 / 3.5)</option>
+                      <option value="openai">OpenAI (o3-mini / GPT-4o)</option>
+                      <option value="deepseek">DeepSeek (R1 Reasoning)</option>
+                      <option value="google">Google Gemini (2.5 Pro)</option>
+                      <option value="ollama">Ollama (Local Models)</option>
+                      <option value="groq">Groq (Ultra-Fast)</option>
+                    </select>
+                  </div>
+
+                  <div className="form-group">
+                    <label className="label">{t("modal.preferred_lang")}</label>
+                    <select
+                      className="input"
+                      value={newProject.preferred_language}
+                      onChange={(e) => setNewProject({ ...newProject, preferred_language: e.target.value })}
+                    >
+                      <option value="fa">فارسی (Persian)</option>
+                      <option value="en">English (US)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="form-group" style={{ marginBottom: "1.2rem" }}>
+                  <label className="label">
+                    {lang === "fa" ? "📁 مسیر پوشه و ورک‌اسپیس پروژه (اختیاری)" : "📁 Project Workspace Directory (Optional)"}
+                  </label>
+                  <input
+                    type="text"
+                    className="input"
+                    dir="ltr"
+                    placeholder={lang === "fa" ? "پیش‌فرض: workspaces/{project_id} یا مسیر دلخواه مثل E:\\projects\\app" : "Default: workspaces/{project_id} or custom path like E:\\projects\\app"}
+                    value={newProject.workspace_path || ""}
+                    onChange={(e) => setNewProject({ ...newProject, workspace_path: e.target.value })}
+                  />
+                  <span style={{ fontSize: "0.75rem", color: "#8E95A5", marginTop: "4px", display: "block" }}>
+                    {lang === "fa"
+                      ? "فایل‌های تولیدشده و دستورات شل ترمینال در این فولدر ذخیره و اجرا خواهند شد."
+                      : "Generated files and terminal commands will be executed inside this folder."}
+                  </span>
+                </div>
               </div>
 
-              <div className="form-group">
-                <label htmlFor="project-description" className="label">Description *</label>
-                <textarea
-                  id="project-description"
-                  className="input textarea"
-                  value={newProject.description}
-                  onChange={(e) => handleInputChange("description", e.target.value)}
-                  required
-                  placeholder="Describe what this project will build..."
-                  rows={4}
-                />
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="project-language" className="label">Preferred Language</label>
-                <select
-                  id="project-language"
-                  className="input select"
-                  value={newProject.preferred_language}
-                  onChange={(e) => handleInputChange("preferred_language", e.target.value)}
+              <footer className="modal-dialog__footer">
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  disabled={createLoading}
+                  onClick={() => setShowCreateModal(false)}
                 >
-                  <option value="en">English</option>
-                  <option value="es">Spanish</option>
-                  <option value="fr">French</option>
-                  <option value="de">German</option>
-                  <option value="zh">Chinese</option>
-                  <option value="ja">Japanese</option>
-                </select>
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="project-timezone" className="label">Timezone</label>
-                <select
-                  id="project-timezone"
-                  className="input select"
-                  value={newProject.timezone}
-                  onChange={(e) => handleInputChange("timezone", e.target.value)}
-                >
-                  <option value="UTC">UTC</option>
-                  <option value="America/New_York">Eastern Time</option>
-                  <option value="America/Chicago">Central Time</option>
-                  <option value="America/Denver">Mountain Time</option>
-                  <option value="America/Los_Angeles">Pacific Time</option>
-                  <option value="Europe/London">London</option>
-                  <option value="Europe/Paris">Paris</option>
-                  <option value="Asia/Tokyo">Tokyo</option>
-                  <option value="Asia/Shanghai">Shanghai</option>
-                </select>
-              </div>
-
-              <footer className="modal__footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setShowCreateModal(false)}>
-                  Cancel
+                  {t("modal.cancel")}
                 </button>
-                <button type="submit" className="btn btn-primary" disabled={createLoading || !newProject.name.trim() || !newProject.description.trim()}>
-                  {createLoading ? (
-                    <>
-                      <span className="loading-spinner" style={{ width: "16px", height: "16px" }}></span>
-                      Creating...
-                    </>
-                  ) : (
-                    "Create Project"
-                  )}
+                <button
+                  type="submit"
+                  className="btn-new-project"
+                  disabled={createLoading || !newProject.name.trim()}
+                >
+                  {createLoading ? t("common.loading") : t("modal.submit")}
                 </button>
               </footer>
             </form>

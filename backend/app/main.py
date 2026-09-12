@@ -12,6 +12,9 @@ from app.api.tasks import router as tasks_router
 from app.api.execution import router as execution_router
 from app.api.approval import router as approval_router
 from app.api.worker import router as worker_controls_router
+from app.api.settings import router as settings_router
+from app.api.agents import router as agents_router
+from app.api.artifact import router as artifact_router
 
 # Configure structured logging (no secrets)
 def configure_logging() -> None:
@@ -78,18 +81,33 @@ def create_app() -> FastAPI:
 
     # Health and readiness endpoints
     app.include_router(health_router, tags=["health"])
+    app.include_router(health_router, prefix="/api", tags=["health"])
     # Authentication endpoints
     app.include_router(auth_router, tags=["auth"])
+    app.include_router(auth_router, prefix="/api", tags=["auth"])
 
     # Project and task CRUD (Phase 2 foundation — auth added in Phase 3)
     app.include_router(tasks_router, tags=["projects", "tasks"])
+    app.include_router(tasks_router, prefix="/api", tags=["projects", "tasks"])
 
     # Execution and real-time monitoring endpoints
-    app.include_router(execution_router, prefix="/execution", tags=["execution", "realtime"])
+    app.include_router(execution_router, tags=["execution", "realtime"])
+    app.include_router(execution_router, prefix="/api", tags=["execution", "realtime"])
     # Approval Center (Phase 5.6)
-    app.include_router(approval_router, prefix="/approvals", tags=["approval", "security"])
+    app.include_router(approval_router, tags=["approval", "security"])
+    app.include_router(approval_router, prefix="/api", tags=["approval", "security"])
     # Worker controls (Phase 6)
-    app.include_router(worker_controls_router, prefix="/worker-controls", tags=["worker", "controls"])
+    app.include_router(worker_controls_router, tags=["worker", "controls"])
+    app.include_router(worker_controls_router, prefix="/api", tags=["worker", "controls"])
+    # Settings and API Key management
+    app.include_router(settings_router, tags=["settings"])
+    app.include_router(settings_router, prefix="/api", tags=["settings"])
+    # Agents Configuration & Prompt Customization
+    app.include_router(agents_router, tags=["agents"])
+    app.include_router(agents_router, prefix="/api", tags=["agents"])
+    # Artifacts & Output Management
+    app.include_router(artifact_router, tags=["artifacts"])
+    app.include_router(artifact_router, prefix="/api", tags=["artifacts"])
 
     @app.get("/", tags=["root"])
     async def root():
