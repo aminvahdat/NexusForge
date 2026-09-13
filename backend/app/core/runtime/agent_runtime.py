@@ -81,6 +81,7 @@ class ExecutionContext:
     approval_policy: str = "smart"
     max_execution_time: int = 180  # seconds
     timeout: Optional[int] = None  # override default
+    task_prompt: Optional[str] = None
     created_at: datetime = field(default_factory=datetime.utcnow)
 
 
