@@ -600,7 +600,7 @@ class DeterministicArtifactAdapter(AgentRuntimeInterface):
                 exit_code=exit_code,
                 output=stdout,
                 error=stderr if exit_code != 0 else None,
-                duration=duration
+                execution_duration_sec=duration
             )
         finally:
             self._procs.pop(session_id, None)
