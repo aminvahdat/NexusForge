@@ -15,7 +15,10 @@ if config.config_file_name is not None:
 import os
 
 if "DATABASE_URL" in os.environ:
-    config.set_main_option("sqlalchemy.url", os.environ["DATABASE_URL"])
+    db_url = os.environ["DATABASE_URL"]
+    if "+asyncpg" in db_url:
+        db_url = db_url.replace("+asyncpg", "")
+    config.set_main_option("sqlalchemy.url", db_url)
 
 # Import Base directly from models.base - this avoids the app/__init__.py chain
 # that would trigger main.py and settings.get_settings()
@@ -23,6 +26,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from app.models.base import Base
 target_metadata = Base.metadata

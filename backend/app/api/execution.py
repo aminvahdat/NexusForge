@@ -266,12 +266,13 @@ async def resume_execution(
 
 
 @router.post("/{execution_id}/retire", response_model=dict, summary="Retire execution")
+@router.post("/{execution_id}/cancel", response_model=dict, summary="Cancel execution")
 async def retire_execution(
     execution_id: str,
     db_session: AsyncSession = Depends(get_db_session),
     current_user: User = Depends(get_current_user),
 ):
-    """Retire (cancel) an execution with real process termination and worker state reset."""
+    """Retire or cancel an execution with real process termination and worker state reset."""
     state = monitor.active_executions.get(execution_id)
     if not state:
         raise HTTPException(status_code=404, detail=f"Execution {execution_id} not found")

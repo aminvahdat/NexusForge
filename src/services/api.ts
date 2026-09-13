@@ -219,6 +219,11 @@ export const executionApi = {
     return response.data;
   },
 
+  cancel: async (executionId: string): Promise<{ execution_id: string; status: string; message: string }> => {
+    const response = await apiClient.post(`/execution/${executionId}/cancel`);
+    return response.data;
+  },
+
   status: async (executionId: string): Promise<ExecutionStatusResponse> => {
     const response = await apiClient.get<ExecutionStatusResponse>(`/execution/status/${executionId}`);
     return response.data;

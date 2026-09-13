@@ -18,6 +18,8 @@ RUN pip install --no-cache-dir hermes-agent>=0.21.0
 COPY backend/ /app/backend/
 COPY backend/worker.py /app/worker.py
 
+ENV PYTHONPATH=/app/backend:/app
+
 # For real E2E: Hermes is installed on host; in production, this container
 # requires the hermes binary available on PATH (installed in base image or mounted)
 # The adapter uses self.hermes_bin (default: "hermes") and checks availability.

@@ -19,6 +19,28 @@ class TaskBase(BaseModel):
     output_artifacts: List[Any] = Field(default_factory=list, description="Output artifact IDs or objects")
     acceptance_criteria: List[Any] = Field(default_factory=list, description="Acceptance criteria")
 
+    @validator("acceptance_criteria", each_item=True, pre=True)
+    def validate_no_raw_command_execution(cls, v):
+        if isinstance(v, str):
+            v_stripped = v.strip().lower()
+            if v_stripped.startswith(("cmd:", "exec:", "sh:", "bash:", "powershell:")):
+                raise ValueError(
+                    "DENIED: User-defined command execution ('cmd:') is prohibited. "
+                    "Tasks must define objectives and acceptance criteria, not shell commands."
+                )
+        return v
+
+    @validator("description")
+    def validate_description_no_cmd_prefix(cls, v):
+        if isinstance(v, str):
+            for line in v.splitlines():
+                if line.strip().lower().startswith(("cmd:", "exec:")):
+                    raise ValueError(
+                        "DENIED: Command execution prefix in task description is prohibited. "
+                        "Tasks must define objectives, not shell commands."
+                    )
+        return v
+
     class Config:
         from_attributes = True
 
@@ -52,6 +74,28 @@ class TaskUpdate(BaseModel):
     retry_count: Optional[int] = Field(None, ge=0)
     max_retries: Optional[int] = Field(None, ge=0)
     due_date: Optional[datetime] = None
+
+    @validator("acceptance_criteria", each_item=True, pre=True)
+    def validate_no_raw_command_execution(cls, v):
+        if isinstance(v, str):
+            v_stripped = v.strip().lower()
+            if v_stripped.startswith(("cmd:", "exec:", "sh:", "bash:", "powershell:")):
+                raise ValueError(
+                    "DENIED: User-defined command execution ('cmd:') is prohibited. "
+                    "Tasks must define objectives and acceptance criteria, not shell commands."
+                )
+        return v
+
+    @validator("description")
+    def validate_description_no_cmd_prefix(cls, v):
+        if isinstance(v, str):
+            for line in v.splitlines():
+                if line.strip().lower().startswith(("cmd:", "exec:")):
+                    raise ValueError(
+                        "DENIED: Command execution prefix in task description is prohibited. "
+                        "Tasks must define objectives, not shell commands."
+                    )
+        return v
 
     class Config:
         from_attributes = True

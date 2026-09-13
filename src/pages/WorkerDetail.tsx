@@ -11,6 +11,8 @@ export const WorkerDetail: React.FC = () => {
   const navigate = useNavigate();
   const [worker, setWorker] = useState<any>(null);
   const [isLoading, setLoading] = useState(true);
+  const [controlError, setControlError] = useState<string | null>(null);
+  const [controlSuccess, setControlSuccess] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadWorker() {
@@ -50,31 +52,43 @@ export const WorkerDetail: React.FC = () => {
 
   const handlePause = async () => {
     if (!worker) return;
+    setControlError(null);
+    setControlSuccess(null);
     try {
       await api.workers.pause(worker.worker_id);
       setWorker((prev: any) => prev ? { ...prev, status: "paused" } : prev);
-    } catch (err) {
-      console.error("Failed to pause worker:", err);
+      setControlSuccess(`Worker ${worker.worker_id} successfully paused (task claims suspended).`);
+    } catch (err: any) {
+      const msg = err?.response?.data?.detail || err?.message || "Failed to pause worker";
+      setControlError(msg);
     }
   };
 
   const handleResume = async () => {
     if (!worker) return;
+    setControlError(null);
+    setControlSuccess(null);
     try {
       await api.workers.resume(worker.worker_id);
       setWorker((prev: any) => prev ? { ...prev, status: "active" } : prev);
-    } catch (err) {
-      console.error("Failed to resume worker:", err);
+      setControlSuccess(`Worker ${worker.worker_id} resumed (task claims enabled).`);
+    } catch (err: any) {
+      const msg = err?.response?.data?.detail || err?.message || "Failed to resume worker";
+      setControlError(msg);
     }
   };
 
   const handleRetire = async () => {
     if (!worker) return;
+    setControlError(null);
+    setControlSuccess(null);
     try {
       await api.workers.retire(worker.worker_id);
       setWorker((prev: any) => prev ? { ...prev, status: "retired" } : prev);
-    } catch (err) {
-      console.error("Failed to retire worker:", err);
+      setControlSuccess(`Worker ${worker.worker_id} retired and scheduled for termination.`);
+    } catch (err: any) {
+      const msg = err?.response?.data?.detail || err?.message || "Failed to retire worker";
+      setControlError(msg);
     }
   };
 
@@ -122,6 +136,16 @@ export const WorkerDetail: React.FC = () => {
 
         <div className="worker-detail__card">
           <h3>Control Panel</h3>
+          {controlError && (
+            <div className="alert alert-error" style={{ marginBottom: "12px" }}>
+              {controlError}
+            </div>
+          )}
+          {controlSuccess && (
+            <div className="alert alert-success" style={{ marginBottom: "12px" }}>
+              {controlSuccess}
+            </div>
+          )}
           <div className="worker-controls">
             {worker.status === "paused" ? (
               <button className="btn btn-primary" onClick={handleResume}>Resume Worker</button>

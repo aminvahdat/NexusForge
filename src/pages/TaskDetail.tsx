@@ -151,6 +151,42 @@ const TaskDetail: React.FC = () => {
     }
   };
 
+  const handleCancelExecution = async () => {
+    if (!executionId) return;
+    try {
+      const result = await executionApi.cancel(executionId);
+      setExecutionStatus(result.status || "cancelled");
+      setExecutionError(null);
+      await fetchData();
+    } catch (err: any) {
+      setExecutionError(err.detail || "Failed to cancel execution");
+    }
+  };
+
+  const handlePauseExecution = async () => {
+    if (!executionId) return;
+    try {
+      const result = await executionApi.pause(executionId);
+      setExecutionStatus(result.status || "paused");
+      setExecutionError(null);
+    } catch (err: any) {
+      const msg = err.detail || (err.response && err.response.data && err.response.data.detail) || "Failed to pause execution";
+      setExecutionError(msg);
+    }
+  };
+
+  const handleResumeExecution = async () => {
+    if (!executionId) return;
+    try {
+      const result = await executionApi.resume(executionId);
+      setExecutionStatus(result.status || "running");
+      setExecutionError(null);
+    } catch (err: any) {
+      const msg = err.detail || (err.response && err.response.data && err.response.data.detail) || "Failed to resume execution";
+      setExecutionError(msg);
+    }
+  };
+
   const handleStatusChange = async (newStatus: string) => {
     try {
       const updated = await taskApi.update(taskId!, { status: newStatus });
@@ -255,15 +291,54 @@ const TaskDetail: React.FC = () => {
                 Start Execution
               </button>
             ) : (
-              <div className="execution-monitor__status-row">
+              <div className="execution-monitor__status-row" style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
                 <ExecutionStatus status={executionStatus} error={executionError || undefined} />
                 <span className="execution-monitor__execution-id">ID: {executionId}</span>
                 <span className={`execution-monitor__connection ${wsConnected ? "connected" : wsReconnecting ? "reconnecting" : "disconnected"}`}>
                   {wsConnected ? "● Live" : wsReconnecting ? "↻ Reconnecting" : "○ Offline"}
                 </span>
+                <div className="execution-monitor__actions" style={{ display: "flex", gap: "8px", marginLeft: "auto" }}>
+                  {executionStatus === "paused" ? (
+                    <button
+                      className="btn btn-outline btn-sm"
+                      onClick={handleResumeExecution}
+                      title="Resume suspended process (POSIX only)"
+                    >
+                      Resume
+                    </button>
+                  ) : executionStatus === "running" ? (
+                    <button
+                      className="btn btn-outline btn-sm"
+                      onClick={handlePauseExecution}
+                      title="Suspend process execution (Windows returns 501 Not Implemented; use Cancel instead)"
+                    >
+                      Pause
+                    </button>
+                  ) : null}
+                  {["running", "paused", "waiting", "queued"].includes(executionStatus) && (
+                    <button
+                      className="btn btn-danger btn-sm"
+                      onClick={handleCancelExecution}
+                      title="Terminate execution process tree immediately"
+                    >
+                      Cancel Execution
+                    </button>
+                  )}
+                </div>
               </div>
             )}
           </div>
+
+          {executionError && (
+            <div className="alert alert-warning" style={{ margin: "10px 0", fontSize: "0.88rem" }} role="alert">
+              <strong>Execution Notice:</strong> {executionError}
+              {executionError.includes("Windows") && (
+                <div style={{ marginTop: "4px", color: "var(--color-text-muted)" }}>
+                  💡 On Windows host systems, native process freezing (SIGSTOP/SIGCONT) is unavailable. Click <strong>Cancel Execution</strong> to terminate the process cleanly.
+                </div>
+              )}
+            </div>
+          )}
 
           {executionId && (
             <>

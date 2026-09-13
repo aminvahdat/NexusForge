@@ -27,6 +27,37 @@ from backend.app.services.execution_monitor import monitor
 from sqlalchemy import select
 
 
+from backend.app.core.runtime.agent_runtime import AgentRuntimeInterface, SessionResult, Status
+
+
+class SafeE2EAdapter(AgentRuntimeInterface):
+    def __init__(self, should_fail: bool = False):
+        self.should_fail = should_fail
+
+    def create_session(self, context):
+        return f"sess-e2e-{uuid.uuid4().hex[:6]}"
+
+    def execute_task(self, session_id, context=None):
+        if self.should_fail:
+            return SessionResult(session_id=session_id, status=Status.FAILED, exit_code=7, error="Fatal failure")
+        if context and context.workspace_path:
+            out_file = Path(context.workspace_path) / "output.txt"
+            out_file.write_text("hello-nexusforge", encoding="utf-8")
+        return SessionResult(session_id=session_id, status=Status.COMPLETED, exit_code=0)
+
+    def terminate(self, session_id):
+        pass
+
+    def cancel(self, session_id):
+        return True
+
+    def get_status(self, session_id):
+        return Status.COMPLETED
+
+    def shutdown(self):
+        pass
+
+
 @pytest.mark.asyncio
 async def test_real_e2e_full_lifecycle():
     """Execute complete 4-part Real E2E suite."""
@@ -35,7 +66,7 @@ async def test_real_e2e_full_lifecycle():
 
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         # ==========================================
-        # 1. SUCCESS PATH: User A Full Flow
+        # 1. SUCCESS PATH: User A Full Flow & Option A Security Gate
         # ==========================================
         # Register User A
         email_a = f"user_a_{uuid.uuid4().hex[:8]}@example.com"
@@ -60,20 +91,32 @@ async def test_real_e2e_full_lifecycle():
         ws_dir = (Path("workspaces") / str(project_id_a)).resolve()
         ws_dir.mkdir(parents=True, exist_ok=True)
 
-        # User A creates a task that writes an artifact file
-        task_res_a = await client.post(f"/api/projects/{project_id_a}/tasks", json={
-            "title": "Build Artifact Task",
-            "description": "Real OS command creating deliverable",
+        # SECURITY PROOF: User A attempts to create a task with arbitrary OS command -> MUST BE DENIED
+        malicious_res = await client.post(f"/api/projects/{project_id_a}/tasks", json={
+            "title": "Malicious RCE Task",
+            "description": "Attempting arbitrary OS command execution",
             "role": "backend_agent",
             "acceptance_criteria": [
                 'cmd:python -c "import pathlib; pathlib.Path(\'output.txt\').write_text(\'hello-nexusforge\')"'
             ]
         }, headers=headers_a)
+        assert malicious_res.status_code in (400, 422)
+        assert "denied" in malicious_res.text.lower()
+
+        # User A creates legitimate goal-based task (accepted)
+        task_res_a = await client.post(f"/api/projects/{project_id_a}/tasks", json={
+            "title": "Build Artifact Task",
+            "description": "Goal: synthesize project deliverable output",
+            "role": "backend_agent",
+            "acceptance_criteria": [
+                "Deliverable output.txt exists in project workspace"
+            ]
+        }, headers=headers_a)
         assert task_res_a.status_code == 201
         task_id_a = task_res_a.json()["id"]
 
-        # Real Worker connects and claims the task
-        worker_a = WorkerProcess(worker_id=f"wkr-e2e-{uuid.uuid4().hex[:6]}")
+        # Real Worker with safe runtime adapter connects and claims the task
+        worker_a = WorkerProcess(worker_id=f"wkr-e2e-{uuid.uuid4().hex[:6]}", adapter=SafeE2EAdapter())
         await worker_a.connect()
         await worker_a.register()
 
@@ -123,16 +166,16 @@ async def test_real_e2e_full_lifecycle():
         # ==========================================
         task_res_fail = await client.post(f"/api/projects/{project_id_a}/tasks", json={
             "title": "Intentional Failure Task",
-            "description": "Command returning non-zero exit code",
+            "description": "Agent task that returns failure status",
             "role": "backend_agent",
             "acceptance_criteria": [
-                'cmd:python -c "import sys; sys.stderr.write(\'fatal defect\'); sys.exit(7)"'
+                "Defect verification"
             ]
         }, headers=headers_a)
         assert task_res_fail.status_code == 201
         task_id_fail = task_res_fail.json()["id"]
 
-        worker_fail = WorkerProcess(worker_id=f"wkr-fail-{uuid.uuid4().hex[:6]}")
+        worker_fail = WorkerProcess(worker_id=f"wkr-fail-{uuid.uuid4().hex[:6]}", adapter=SafeE2EAdapter(should_fail=True))
         await worker_fail.connect()
         await worker_fail.register()
 

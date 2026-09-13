@@ -77,25 +77,58 @@ async def test_worker_registration_and_db_state():
         assert w_record.last_heartbeat is not None
 
 
+from backend.app.core.runtime.agent_runtime import AgentRuntimeInterface, SessionResult, Status
+
+
+class SafeTestSuccessAdapter(AgentRuntimeInterface):
+    def create_session(self, context):
+        return "sess-succ"
+    def execute_task(self, session_id, context=None):
+        return SessionResult(session_id=session_id, status=Status.COMPLETED, exit_code=0)
+    def terminate(self, session_id):
+        pass
+    def cancel(self, session_id):
+        return True
+    def get_status(self, session_id):
+        return Status.COMPLETED
+    def shutdown(self):
+        pass
+
+
+class SafeTestFailureAdapter(AgentRuntimeInterface):
+    def create_session(self, context):
+        return "sess-fail"
+    def execute_task(self, session_id, context=None):
+        return SessionResult(session_id=session_id, status=Status.FAILED, exit_code=1, error="Intentional test failure")
+    def terminate(self, session_id):
+        pass
+    def cancel(self, session_id):
+        return True
+    def get_status(self, session_id):
+        return Status.FAILED
+    def shutdown(self):
+        pass
+
+
 @pytest.mark.asyncio
 async def test_real_process_execution_success(sample_project):
-    """Verify task executing a successful process transitions to completed."""
+    """Verify task executing through adapter transitions to completed."""
     session_factory = get_session_factory()
     task_id = uuid.uuid4()
     async with session_factory() as session:
         task = Task(
             id=task_id,
             project_id=sample_project["project_id"],
-            title="Execute Success Command",
-            description="Task with exit 0",
+            title="Execute Success Agent Task",
+            description="Task executed via runtime adapter",
             role="backend_agent",
             status="queued",
-            acceptance_criteria=['cmd:python -c "import sys; sys.exit(0)"']
+            acceptance_criteria=["Verify deliverable meets specification"]
         )
         session.add(task)
         await session.commit()
 
-    worker = WorkerProcess(worker_id=f"wkr-succ-{uuid.uuid4().hex[:6]}")
+    worker = WorkerProcess(worker_id=f"wkr-succ-{uuid.uuid4().hex[:6]}", adapter=SafeTestSuccessAdapter())
     await worker.connect()
     await worker.register()
 
@@ -115,23 +148,23 @@ async def test_real_process_execution_success(sample_project):
 
 @pytest.mark.asyncio
 async def test_real_process_execution_failure_fails_closed(sample_project):
-    """Verify task executing a failing process transitions to failed (Fail Closed)."""
+    """Verify task executing a failing runtime transitions to failed (Fail Closed)."""
     session_factory = get_session_factory()
     task_id = uuid.uuid4()
     async with session_factory() as session:
         task = Task(
             id=task_id,
             project_id=sample_project["project_id"],
-            title="Execute Failing Command",
-            description="Task with non-zero exit code",
+            title="Execute Failing Agent Task",
+            description="Task with runtime failure",
             role="backend_agent",
             status="queued",
-            acceptance_criteria=['cmd:python -c "import sys; sys.stderr.write(\'Intentional error\\n\'); sys.exit(42)"']
+            acceptance_criteria=["Task expecting failure"]
         )
         session.add(task)
         await session.commit()
 
-    worker = WorkerProcess(worker_id=f"wkr-fail-{uuid.uuid4().hex[:6]}")
+    worker = WorkerProcess(worker_id=f"wkr-fail-{uuid.uuid4().hex[:6]}", adapter=SafeTestFailureAdapter())
     await worker.connect()
     await worker.register()
 

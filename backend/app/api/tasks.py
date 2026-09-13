@@ -513,6 +513,22 @@ async def create_task(
     if not task_in.title.strip():
         raise HTTPException(status_code=400, detail="Task title is required")
 
+    # Command Execution Prevention (Option A)
+    if task_in.acceptance_criteria:
+        for c in task_in.acceptance_criteria:
+            if isinstance(c, str) and c.strip().lower().startswith(("cmd:", "exec:", "sh:", "bash:", "powershell:")):
+                raise HTTPException(
+                    status_code=400,
+                    detail="DENIED: User-defined command execution ('cmd:') is prohibited. Tasks must define objectives and acceptance criteria, not shell commands."
+                )
+    if task_in.description:
+        for line in task_in.description.splitlines():
+            if line.strip().lower().startswith(("cmd:", "exec:")):
+                raise HTTPException(
+                    status_code=400,
+                    detail="DENIED: Command execution prefix in task description is prohibited. Tasks must define objectives, not shell commands."
+                )
+
     effective_project_id = project_id or task_in.project_id
     if not effective_project_id:
         raise HTTPException(status_code=400, detail="project_id is required")
@@ -603,6 +619,22 @@ async def update_task(
         project = await get_project(db_session, str(task.project_id))
         if project:
             enforce_ownership(project.owner_id, current_user, "task")
+
+    # Command Execution Prevention (Option A)
+    if task_in.acceptance_criteria is not None:
+        for c in task_in.acceptance_criteria:
+            if isinstance(c, str) and c.strip().lower().startswith(("cmd:", "exec:", "sh:", "bash:", "powershell:")):
+                raise HTTPException(
+                    status_code=400,
+                    detail="DENIED: User-defined command execution ('cmd:') is prohibited. Tasks must define objectives and acceptance criteria, not shell commands."
+                )
+    if task_in.description is not None:
+        for line in task_in.description.splitlines():
+            if line.strip().lower().startswith(("cmd:", "exec:")):
+                raise HTTPException(
+                    status_code=400,
+                    detail="DENIED: Command execution prefix in task description is prohibited. Tasks must define objectives, not shell commands."
+                )
 
     if task_in.title is not None:
         task.title = task_in.title
