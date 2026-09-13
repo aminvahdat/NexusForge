@@ -283,6 +283,13 @@ PROVIDER_MODELS: dict[str, list[dict]] = {
         {"id": "deepseek-reasoner", "name": "DeepSeek-R1 (Full Reasoning)", "description": "Full open reasoning model with CoT tokens", "supports_reasoning": True, "context_window": 64000, "recommended_effort": "high"},
         {"id": "deepseek-chat", "name": "DeepSeek-V3 (Chat & Code)", "description": "High throughput MoE architecture", "supports_reasoning": False, "context_window": 64000, "recommended_effort": "none"},
     ],
+    "openrouter": [
+        {"id": "openrouter/auto", "name": "OpenRouter Auto (Best Available)", "description": "Automatically routes to optimal model", "supports_reasoning": False, "context_window": 128000, "recommended_effort": "none"},
+        {"id": "anthropic/claude-3.5-sonnet", "name": "Claude 3.5 Sonnet (via OpenRouter)", "description": "Top tier code generation and tool use", "supports_reasoning": False, "context_window": 200000, "recommended_effort": "none"},
+        {"id": "deepseek/deepseek-r1", "name": "DeepSeek R1 (via OpenRouter)", "description": "Open weights deep reasoning model", "supports_reasoning": True, "context_window": 64000, "recommended_effort": "high"},
+        {"id": "meta-llama/llama-3.3-70b-instruct", "name": "Llama 3.3 70B (via OpenRouter)", "description": "High performance open model", "supports_reasoning": False, "context_window": 128000, "recommended_effort": "none"},
+        {"id": "openrouter/free", "name": "OpenRouter Free Tier", "description": "Community free rotating models", "supports_reasoning": False, "context_window": 32000, "recommended_effort": "none"},
+    ],
 }
 
 

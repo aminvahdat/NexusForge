@@ -13,10 +13,11 @@ from app.auth import (
     create_access_token,
     get_current_user,
 )
-from app.models import User
+from app.models import User, UserAPIKey
 from app.schemas.user import Token, UserLogin, UserResponse
 
 import bcrypt
+import uuid
 
 
 def hash_password(password: str) -> str:
@@ -32,7 +33,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 class UserRegister(BaseModel):
     email: str = Field(..., description="User email address")
-    password: str = Field(..., min_length=8, description="Password (min 8 chars)")
+    password: str = Field(..., min_length=6, description="Password (min 6 chars)")
     username: Optional[str] = None
 
 
@@ -48,6 +49,7 @@ async def register(user_data: UserRegister, db_session: AsyncSession = Depends(g
         username=user_data.username.strip() if user_data.username else clean_email.split('@')[0],
         password_hash=hash_password(user_data.password),
         is_active=True,
+        email_verified=True,
     )
     db_session.add(new_user)
     await db_session.commit()
@@ -86,7 +88,25 @@ async def login(user_data: UserLogin, db_session: AsyncSession = Depends(get_db_
 
 
 @router.get("/me", response_model=dict)
-async def read_current_user(current_user: User = Depends(get_current_user)):
+async def read_current_user(
+    current_user: User = Depends(get_current_user),
+    db_session: AsyncSession = Depends(get_db_session),
+):
+    user_id = current_user.id
+    if isinstance(user_id, str):
+        try:
+            user_id = uuid.UUID(user_id)
+        except ValueError:
+            pass
+
+    key_res = await db_session.execute(
+        select(UserAPIKey).where(
+            UserAPIKey.user_id == user_id,
+            UserAPIKey.is_active == True,
+        )
+    )
+    has_provider = key_res.scalars().first() is not None
+
     return {
         "user": {
             "id": str(current_user.id),
@@ -94,6 +114,8 @@ async def read_current_user(current_user: User = Depends(get_current_user)):
             "username": current_user.username,
             "is_active": current_user.is_active,
             "is_superuser": current_user.is_superuser,
+            "email_verified": current_user.email_verified,
+            "has_configured_provider": has_provider,
         }
     }
 

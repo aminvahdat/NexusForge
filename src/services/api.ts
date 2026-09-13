@@ -42,6 +42,39 @@ apiClient.interceptors.response.use(
   }
 );
 
+// === AUTH API ===
+export const authApi = {
+  login: async (credentials: { email: string; password: string }) => {
+    const response = await apiClient.post<{ access_token: string; token_type: string }>("/auth/login", credentials);
+    return response.data;
+  },
+
+  register: async (data: { email: string; password: string; username?: string }) => {
+    const response = await apiClient.post<{ access_token: string; token_type: string }>("/auth/register", data);
+    return response.data;
+  },
+
+  me: async () => {
+    const response = await apiClient.get<{
+      user: {
+        id: string;
+        email: string;
+        username: string;
+        is_active: boolean;
+        is_superuser: boolean;
+        email_verified?: boolean;
+        has_configured_provider?: boolean;
+      };
+    }>("/auth/me");
+    return response.data;
+  },
+
+  logout: async () => {
+    const response = await apiClient.post("/auth/logout");
+    return response.data;
+  },
+};
+
 // === PROJECT API ===
 export const projectApi = {
   getAll: async (status?: string): Promise<Project[]> => {
