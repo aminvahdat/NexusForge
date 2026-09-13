@@ -31,7 +31,7 @@ class TestSettings:
 
     def test_env_friends_local_docker(self):
         s = Settings()
-        assert s.database_url.startswith(('postgresql://', 'sqlite'))
+        assert s.database_url.startswith(('postgresql://', 'postgresql+', 'sqlite'))
         assert s.redis_url.startswith('redis://')
         assert 'postgres' in s.database_url or 'redis' in s.database_url or 'sqlite' in s.database_url
 
@@ -76,4 +76,4 @@ def test_config_uses_env_for_db():
     # Verify database is fully environment-driven (not hardcoded)
     s = Settings()
     # The default can be overridden via .env
-    assert s.database_url.startswith(('postgresql://', 'sqlite'))
+    assert s.database_url.startswith(('postgresql://', 'postgresql+', 'sqlite'))
