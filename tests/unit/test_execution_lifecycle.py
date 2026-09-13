@@ -184,7 +184,7 @@ async def test_real_process_execution_failure_fails_closed(sample_project):
 @pytest.mark.asyncio
 async def test_missing_runtime_fails_closed(sample_project, monkeypatch):
     """Verify task with no command and no hermes binary fails closed immediately."""
-    monkeypatch.setenv("NEXUSFORGE_RUNTIME_ADAPTER", "hermes")
+    monkeypatch.setenv("AGENT_RUNTIME_ADAPTER", "hermes")
     monkeypatch.setenv("HERMES_BINARY_PATH", "/nonexistent/hermes")
     session_factory = get_session_factory()
     task_id = uuid.uuid4()
