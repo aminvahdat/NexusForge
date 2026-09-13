@@ -523,7 +523,7 @@ async def create_task(
                 )
     if task_in.description:
         for line in task_in.description.splitlines():
-            if line.strip().lower().startswith(("cmd:", "exec:")):
+            if line.strip().lower().startswith(("cmd:", "exec:", "sh:", "bash:", "powershell:")):
                 raise HTTPException(
                     status_code=400,
                     detail="DENIED: Command execution prefix in task description is prohibited. Tasks must define objectives, not shell commands."
@@ -630,7 +630,7 @@ async def update_task(
                 )
     if task_in.description is not None:
         for line in task_in.description.splitlines():
-            if line.strip().lower().startswith(("cmd:", "exec:")):
+            if line.strip().lower().startswith(("cmd:", "exec:", "sh:", "bash:", "powershell:")):
                 raise HTTPException(
                     status_code=400,
                     detail="DENIED: Command execution prefix in task description is prohibited. Tasks must define objectives, not shell commands."

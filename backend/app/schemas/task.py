@@ -34,7 +34,7 @@ class TaskBase(BaseModel):
     def validate_description_no_cmd_prefix(cls, v):
         if isinstance(v, str):
             for line in v.splitlines():
-                if line.strip().lower().startswith(("cmd:", "exec:")):
+                if line.strip().lower().startswith(("cmd:", "exec:", "sh:", "bash:", "powershell:")):
                     raise ValueError(
                         "DENIED: Command execution prefix in task description is prohibited. "
                         "Tasks must define objectives, not shell commands."
@@ -90,7 +90,7 @@ class TaskUpdate(BaseModel):
     def validate_description_no_cmd_prefix(cls, v):
         if isinstance(v, str):
             for line in v.splitlines():
-                if line.strip().lower().startswith(("cmd:", "exec:")):
+                if line.strip().lower().startswith(("cmd:", "exec:", "sh:", "bash:", "powershell:")):
                     raise ValueError(
                         "DENIED: Command execution prefix in task description is prohibited. "
                         "Tasks must define objectives, not shell commands."
