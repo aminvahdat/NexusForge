@@ -8,6 +8,9 @@ services:
       dockerfile: Dockerfile
     environment:
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres_dev_password@postgres:5432/nexusforge
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-nexusforge-dev-secret-key-must-be-32-chars-long}
+      - JWT_SECRET=${JWT_SECRET:-nexusforge-dev-secret-key-must-be-32-chars-long}
+      - SECRET_KEY=${SECRET_KEY:-nexusforge-dev-secret-key-must-be-32-chars-long}
     depends_on:
       postgres:
         condition: service_healthy
@@ -52,6 +55,9 @@ services:
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres_dev_password@postgres:5432/nexusforge
       - REDIS_URL=redis://redis:6379/0
       - MAX_CONCURRENT_WORKERS=${MAX_CONCURRENT_WORKERS:-2}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-nexusforge-dev-secret-key-must-be-32-chars-long}
+      - JWT_SECRET=${JWT_SECRET:-nexusforge-dev-secret-key-must-be-32-chars-long}
+      - SECRET_KEY=${SECRET_KEY:-nexusforge-dev-secret-key-must-be-32-chars-long}
     depends_on:
       - postgres
       - redis
