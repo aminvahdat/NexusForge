@@ -1,7 +1,6 @@
 import React, { useRef, useEffect } from "react";
 import { ExecutionEvent } from "../types";
 import { Skeleton } from "./Skeleton";
-import "./ExecutionTimeline.css";
 
 /* ExecutionTimeline — Phase 5.5 Enhanced Real-Time Timeline
    - Chronological events with readable timestamps

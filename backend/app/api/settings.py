@@ -11,6 +11,7 @@ from sqlalchemy import select, delete
 from app.db import get_db_session
 from app.models import User, UserAPIKey
 from app.auth import get_current_user
+from app.authorization import require_superuser, enforce_ownership
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -84,52 +85,13 @@ def to_uuid(val) -> Optional[uuid.UUID]:
         return None
 
 
-async def get_user_from_auth(
-    db_session: AsyncSession,
-    current_user: Optional[User],
-) -> Optional[User]:
-    """Resolve the real database User object from current_user or admin fallback."""
-    if current_user:
-        # 1. Try resolving by current_user.id if it's a valid UUID
-        user_uuid = to_uuid(getattr(current_user, "id", None))
-        if user_uuid:
-            res = await db_session.execute(select(User).where(User.id == user_uuid))
-            u = res.scalar_one_or_none()
-            if u:
-                return u
-
-        # 2. Try resolving by current_user.email
-        email = getattr(current_user, "email", None)
-        if email and "@" in email:
-            res = await db_session.execute(select(User).where(User.email == email))
-            u = res.scalar_one_or_none()
-            if u:
-                return u
-
-        # 3. If current_user.id contains an email address (from JWT sub)
-        sub = str(getattr(current_user, "id", ""))
-        if "@" in sub:
-            res = await db_session.execute(select(User).where(User.email == sub))
-            u = res.scalar_one_or_none()
-            if u:
-                return u
-
-    # 4. Fallback to admin user
-    admin_res = await db_session.execute(select(User).where(User.email == "admin@nexusforge.io"))
-    return admin_res.scalar_one_or_none()
-
-
 @router.get("/keys", response_model=List[APIKeyResponse], summary="List configured API keys")
 async def list_api_keys(
     db_session: AsyncSession = Depends(get_db_session),
-    current_user: Optional[User] = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    """Retrieve all configured API keys (masked) for the current user or system admin."""
-    user = await get_user_from_auth(db_session, current_user)
-    if not user:
-        return []
-
-    user_uuid = to_uuid(user.id) or user.id
+    """Retrieve all configured API keys (masked) for the current authenticated user."""
+    user_uuid = to_uuid(current_user.id) or current_user.id
 
     result = await db_session.execute(
         select(UserAPIKey).where(UserAPIKey.user_id == user_uuid).order_by(UserAPIKey.created_at.desc())
@@ -156,14 +118,10 @@ async def list_api_keys(
 async def create_api_key(
     key_in: APIKeyCreate,
     db_session: AsyncSession = Depends(get_db_session),
-    current_user: Optional[User] = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    """Save an API key for a specified AI provider."""
-    user = await get_user_from_auth(db_session, current_user)
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-
-    user_uuid = to_uuid(user.id) or user.id
+    """Save an API key for the current authenticated user."""
+    user_uuid = to_uuid(current_user.id) or current_user.id
 
     # Check if provider already has an active key for this user
     existing_res = await db_session.execute(
@@ -221,9 +179,9 @@ async def create_api_key(
 async def delete_api_key(
     key_id: str,
     db_session: AsyncSession = Depends(get_db_session),
-    current_user: Optional[User] = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    """Delete a configured API key."""
+    """Delete a configured API key with ownership enforcement."""
     try:
         key_uuid = uuid.UUID(key_id)
     except ValueError:
@@ -234,13 +192,18 @@ async def delete_api_key(
     if not key:
         raise HTTPException(status_code=404, detail="API key not found")
 
+    enforce_ownership(key.user_id, current_user, "API key")
+
     await db_session.delete(key)
     await db_session.commit()
     return {"message": "API key successfully removed", "id": key_id}
 
 
 @router.post("/test-key", summary="Test API key connectivity")
-async def test_api_key(req: TestKeyRequest):
+async def test_api_key(
+    req: TestKeyRequest,
+    current_user: User = Depends(get_current_user),
+):
     """Verify that an API key format or connection is valid."""
     provider = req.provider.lower()
     key = req.api_key.strip()
@@ -324,7 +287,10 @@ PROVIDER_MODELS: dict[str, list[dict]] = {
 
 
 @router.post("/fetch-models", response_model=FetchModelsResponse, summary="Fetch available models for a provider")
-async def fetch_models(req: FetchModelsRequest):
+async def fetch_models(
+    req: FetchModelsRequest,
+    current_user: User = Depends(get_current_user),
+):
     """Retrieve available models dynamically or from the curated registry."""
     provider = req.provider.lower().strip()
     source = "curated"
@@ -404,14 +370,19 @@ async def fetch_models(req: FetchModelsRequest):
 
 
 @router.get("/system", response_model=SystemSettings, summary="Get system settings")
-async def get_system_settings():
+async def get_system_settings(
+    current_user: User = Depends(get_current_user),
+):
     """Retrieve global system and notification settings."""
     return _SYSTEM_SETTINGS
 
 
 @router.post("/system", response_model=SystemSettings, summary="Save system settings")
-async def update_system_settings(settings_in: SystemSettings):
-    """Update global system and notification settings."""
+async def update_system_settings(
+    settings_in: SystemSettings,
+    admin_user: User = Depends(require_superuser),
+):
+    """Update global system and notification settings (Admin only)."""
     global _SYSTEM_SETTINGS
     _SYSTEM_SETTINGS = settings_in
     return _SYSTEM_SETTINGS
@@ -435,7 +406,10 @@ class RecommendRolesResponse(BaseModel):
 
 
 @router.post("/recommend-roles", response_model=RecommendRolesResponse, summary="Get smart model recommendations per role")
-async def recommend_roles(req: FetchModelsRequest):
+async def recommend_roles(
+    req: FetchModelsRequest,
+    current_user: User = Depends(get_current_user),
+):
     """Smart model matchmaking: recommends the optimal model for each agent role based on live provider models."""
     provider = req.provider.lower().strip()
     fetched = await fetch_models(req)

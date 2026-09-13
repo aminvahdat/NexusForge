@@ -24,10 +24,10 @@ const translations: Record<Language, Record<string, string>> = {
 
     // Dashboard Hero & Autonomous Prompt
     "hero.tagline": "ایده از شما، ساخت خودکار از نکسوس‌فورج",
-    "hero.subtitle": "فقط هدف یا نیاز نرم‌افزاری خود را توصیف کنید؛ «آریا» و ایجنت‌های خودمختار بقیه مسیر را کامل می‌کنند.",
+    "hero.subtitle": "فقط هدف یا نیاز نرم‌افزاری خود را توصیف کنید؛ نکسوس‌فورج معماری و اجرای واقعی تسک‌ها را مدیریت می‌کند.",
     "hero.prompt_placeholder": "مثال: یک وب‌اپلیکیشن مدیریت وظایف تیمی با قابلیت چت زنده، تگ‌گذاری و احراز هویت با React و FastAPI بساز...",
     "hero.launch_btn": "🚀 پرتاب فورج خودکار",
-    "hero.launching": "در حال ساخت و ارسال به آریا...",
+    "hero.launching": "در حال راه‌اندازی پروژه و ساخت فضای کاری...",
     "hero.quick_prompts": "پیشنهادهای سریع:",
     "hero.quick_prompt_1": "💳 سامانه درگاه پرداخت و کیف‌پول کریپتو با اعتبارسنجی امن",
     "hero.quick_prompt_2": "📊 داشبورد تحلیل داده‌های فروش با چارت‌های زنده و وب‌سوکت",
@@ -114,10 +114,10 @@ const translations: Record<Language, Record<string, string>> = {
 
     // Dashboard Hero & Autonomous Prompt
     "hero.tagline": "From Vision to Production — Autonomous Forge",
-    "hero.subtitle": "State your goal and let Arya & the autonomous agents handle the entire architecture and implementation.",
+    "hero.subtitle": "State your goal and let NexusForge handle the technical architecture and real task execution.",
     "hero.prompt_placeholder": "E.g. Build a collaborative task board with real-time WebSockets, tags, and JWT auth using React and FastAPI...",
     "hero.launch_btn": "🚀 Launch Autonomous Forge",
-    "hero.launching": "Forging project & notifying Arya...",
+    "hero.launching": "Forging project & creating workspace...",
     "hero.quick_prompts": "Quick suggestions:",
     "hero.quick_prompt_1": "💳 Crypto payment gateway & multi-sig wallet engine",
     "hero.quick_prompt_2": "📊 Real-time analytics dashboard with live websocket charts",

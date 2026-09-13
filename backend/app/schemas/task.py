@@ -3,8 +3,8 @@
 from pydantic import BaseModel, Field, validator
 from typing import List, Optional, Any
 from datetime import datetime
-from app.models.task import Task as TaskModel
-from app.models.task import AgentRole, Priority, TaskStatus
+from app.models import Task as TaskModel
+from app.models.enums import AgentRole, Priority, TaskStatus
 
 
 class TaskBase(BaseModel):

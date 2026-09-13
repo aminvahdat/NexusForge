@@ -48,6 +48,36 @@ export const WorkerDetail: React.FC = () => {
     );
   }
 
+  const handlePause = async () => {
+    if (!worker) return;
+    try {
+      await api.workers.pause(worker.worker_id);
+      setWorker((prev: any) => prev ? { ...prev, status: "paused" } : prev);
+    } catch (err) {
+      console.error("Failed to pause worker:", err);
+    }
+  };
+
+  const handleResume = async () => {
+    if (!worker) return;
+    try {
+      await api.workers.resume(worker.worker_id);
+      setWorker((prev: any) => prev ? { ...prev, status: "active" } : prev);
+    } catch (err) {
+      console.error("Failed to resume worker:", err);
+    }
+  };
+
+  const handleRetire = async () => {
+    if (!worker) return;
+    try {
+      await api.workers.retire(worker.worker_id);
+      setWorker((prev: any) => prev ? { ...prev, status: "retired" } : prev);
+    } catch (err) {
+      console.error("Failed to retire worker:", err);
+    }
+  };
+
   return (
     <div className="worker-detail">
       <div className="worker-detail-header">
@@ -60,7 +90,7 @@ export const WorkerDetail: React.FC = () => {
       <div className="worker-detail__content">
         <div className="worker-detail-header">
           <h2>Worker {worker.worker_id}</h2>
-          <div className="worker-status-badge {worker.status.toLowerCase()}">
+          <div className={`worker-status-badge ${worker.status?.toLowerCase() || ''}`}>
             {worker.status}
           </div>
         </div>
@@ -77,33 +107,33 @@ export const WorkerDetail: React.FC = () => {
               <div key={task.id} className="task-item">
                 <h4>{task.title}</h4>
                 <p><strong>Status:</strong> {task.status}</p>
-                <span className="task-badge {task.status.toLowerCase()}">{task.status}</span>
+                <span className={`task-badge ${task.status?.toLowerCase() || ''}`}>{task.status}</span>
               </div>
             ))
           ) : (
             <div className="task-empty">
               <EmptyState
                 title="No tasks assigned"
-                description="This worker has no active tasks. Click 'Start' to begin a new task."
+                description="This worker has no active tasks."
               />
             </div>
           )}
         </div>
 
         <div className="worker-detail__card">
-          <h3>Execution Timeline</h3>
-          <div>Execution timeline for {worker.worker_id}</div>
-        </div>
-
-        <div className="worker-detail__card">
           <h3>Control Panel</h3>
           <div className="worker-controls">
-            <button className="btn btn-primary" onClick={() => alert('Start execution (mock)')}>Start Execution</button>
-            <button className="btn btn-secondary" onClick={() => alert('Pause execution (mock)')}>Pause Execution</button>
-            <button className="btn btn-danger" onClick={() => alert('Retire worker (mock)')}>Retire Worker</button>
+            {worker.status === "paused" ? (
+              <button className="btn btn-primary" onClick={handleResume}>Resume Worker</button>
+            ) : (
+              <button className="btn btn-secondary" onClick={handlePause}>Pause Worker</button>
+            )}
+            <button className="btn btn-danger" onClick={handleRetire}>Retire Worker</button>
           </div>
         </div>
       </div>
     </div>
   );
-};export default WorkerDetail;
+};
+
+export default WorkerDetail;

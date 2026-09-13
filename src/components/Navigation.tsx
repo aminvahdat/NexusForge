@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useLanguage } from "../context/LanguageContext";
-import "./Navigation.css";
 
 interface NavItem {
   label: string;
@@ -203,15 +202,18 @@ const Navigation: React.FC = () => {
           </div>
 
           <div className="navigation__user-profile">
-            <div className="navigation__user-avatar">A</div>
+            <div className="navigation__user-avatar">
+              {(localStorage.getItem("user_email") || "O").charAt(0).toUpperCase()}
+            </div>
             <div className="navigation__user-details">
-              <span className="navigation__user-email">admin@nexusforge.io</span>
+              <span className="navigation__user-email">{localStorage.getItem("user_email") || "Operator"}</span>
               <span className="navigation__user-role">{t("nav.user")}</span>
             </div>
             <button
               className="navigation__logout-btn"
               onClick={() => {
                 localStorage.removeItem("token");
+                localStorage.removeItem("user_email");
                 window.location.href = "/login";
               }}
               title="Sign Out"

@@ -36,7 +36,12 @@ export const WorkersPage: React.FC = () => {
 
   const loadWorkers = async () => {
     try {
-      const response = await fetch("/api/workers");
+      const token = localStorage.getItem("token");
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      const response = await fetch("/api/workers", { headers });
       if (response.ok) {
         const data = await response.json();
         setWorkers(data.workers || []);
@@ -135,7 +140,7 @@ export const WorkersPage: React.FC = () => {
             </div>
             <div className="edu-pill">
               <span className="edu-pill-bullet">2</span>
-              <span>{language === "fa" ? "فراخوانی مدل‌ها و ایجنت‌ها (Arya, Vulcan, Prism)" : "Agent Collaboration"}</span>
+              <span>{language === "fa" ? "توزیع و نظارت بر وظایف ورکرها" : "Task Dispatch & Execution"}</span>
             </div>
             <div className="edu-pill">
               <span className="edu-pill-bullet">3</span>
@@ -252,7 +257,7 @@ export const WorkersPage: React.FC = () => {
                     {language === "fa" ? "وضعیت تسک:" : "Task Status:"}
                   </div>
                   <div className="worker-task-title" style={{ fontSize: "0.85rem", color: "#94A3B8" }}>
-                    {language === "fa" ? "در انتظار دریافت تسک جدید از آریا" : "Idle — waiting for dispatch from Arya"}
+                    {language === "fa" ? "آماده دریافت تسک جدید" : "Idle — waiting for task"}
                   </div>
                 </div>
               )}

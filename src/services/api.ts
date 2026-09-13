@@ -241,6 +241,21 @@ export const workerApi = {
     const response = await apiClient.get<WorkerDetailResponse>(`/workers/${workerId}`);
     return response.data;
   },
+
+  pause: async (workerId: string) => {
+    const response = await apiClient.post(`/workers/pause/${workerId}`);
+    return response.data;
+  },
+
+  resume: async (workerId: string) => {
+    const response = await apiClient.post(`/workers/resume/${workerId}`);
+    return response.data;
+  },
+
+  retire: async (workerId: string) => {
+    const response = await apiClient.post(`/workers/retire/${workerId}`);
+    return response.data;
+  },
 };
 
 // === SETTINGS API ===

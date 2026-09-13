@@ -26,22 +26,32 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const checkAuth = async () => {
-      // Fast path: token present in localStorage (set by Login/Register)
-      if (localStorage.getItem("token")) {
-        try {
-          const res = await axios.get(`${API_BASE}/auth/me`, { timeout: 5000, withCredentials: true });
-          setIsAuthenticated(!!res.data.user);
-        } catch {
-          setIsAuthenticated(true); // token exists; let backend verify on real requests
-        } finally {
-          setLoading(false);
-        }
+      const token = localStorage.getItem("token");
+      if (!token) {
+        setIsAuthenticated(false);
+        setLoading(false);
         return;
       }
       try {
-        const res = await axios.get(`${API_BASE}/auth/me`, { timeout: 5000, withCredentials: true });
-        setIsAuthenticated(!!res.data.user);
+        const res = await axios.get(`${API_BASE}/auth/me`, {
+          timeout: 5000,
+          headers: { Authorization: `Bearer ${token}` },
+          withCredentials: true,
+        });
+        const hasUser = !!(res.data && (res.data.user || res.data.id || res.data.email));
+        setIsAuthenticated(hasUser);
+        if (hasUser) {
+          const userEmail = res.data?.email || res.data?.user?.email;
+          if (userEmail) {
+            localStorage.setItem("user_email", userEmail);
+          }
+        } else {
+          localStorage.removeItem("token");
+          localStorage.removeItem("user_email");
+        }
       } catch (err) {
+        localStorage.removeItem("token");
+        localStorage.removeItem("user_email");
         setIsAuthenticated(false);
       } finally {
         setLoading(false);

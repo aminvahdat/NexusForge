@@ -1,156 +1,10 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { projectApi } from "../services/api";
+import { projectApi, taskApi } from "../services/api";
 import { useLanguage } from "../context/LanguageContext";
-import { Project, ProjectMessage, WorkspaceFile } from "../types";
+import { Project, ProjectMessage, WorkspaceFile, Task } from "../types";
 import "./ProjectDetail.css";
 
-export interface AgentSquadMember {
-  id: string;
-  role: string;
-  codename: string;
-  badge: string;
-  roleTitleFa: string;
-  roleTitleEn: string;
-  model: string;
-  descFa: string;
-  descEn: string;
-}
-
-export const SQUAD_12_AGENTS: AgentSquadMember[] = [
-  {
-    id: "chief_orchestrator",
-    role: "chief_orchestrator",
-    codename: "Arya",
-    badge: "👑",
-    roleTitleFa: "هدایتگر ارشد کل",
-    roleTitleEn: "Chief Orchestrator",
-    model: "meta-llama/llama-3.3-70b-instruct:free",
-    descFa: "تعامل دوستانه به زبان فارسی با کاربر، هدایت بی‌وقفه ۱۱ ایجنت، تفویض تسک‌ها و کنترل کیفی نهایی.",
-    descEn: "Bilingual user liaison (Persian/English), relentless multi-agent orchestration, and output quality control.",
-  },
-  {
-    id: "project_planner",
-    role: "project_planner",
-    codename: "Chronos",
-    badge: "⏳",
-    roleTitleFa: "برنامه‌ریز و استراتژیست",
-    roleTitleEn: "Project Planner",
-    model: "meta-llama/llama-3.3-70b-instruct:free",
-    descFa: "شکست تسک‌ها (WBS)، تفکیک مایل‌استون‌ها، گراف وابستگی‌ها و معیارهای پذیرش (DoD).",
-    descEn: "Agile WBS, user stories, milestone dependency mapping, and acceptance criteria.",
-  },
-  {
-    id: "research_agent",
-    role: "research_agent",
-    codename: "Phantom",
-    badge: "🔮",
-    roleTitleFa: "متخصص تحقیق و مستندات",
-    roleTitleEn: "Research Specialist",
-    model: "mistralai/mistral-small-24b-instruct-2501:free",
-    descFa: "اعتبارسنجی مستندات فنی رسمی، مقایسه کتابخانه‌ها و حذف فرض‌های نادرست.",
-    descEn: "Official documentation auditing, package compatibility verification, and zero-hallucination benchmark.",
-  },
-  {
-    id: "software_architect",
-    role: "software_architect",
-    codename: "Synapse",
-    badge: "🏛️",
-    roleTitleFa: "معمار سیستم و PRD",
-    roleTitleEn: "Software Architect",
-    model: "deepseek/deepseek-r1:free",
-    descFa: "معماری تمیز، تفکیک دامنه‌ها (DDD)، قراردادهای OpenAPI و سند معماری سیستم.",
-    descEn: "Clean Architecture, Domain-Driven Design (DDD), OpenAPI contracts, and system_architecture.md.",
-  },
-  {
-    id: "database_agent",
-    role: "database_agent",
-    codename: "Matrix",
-    badge: "🌐",
-    roleTitleFa: "معمار پایگاه‌داده",
-    roleTitleEn: "Database Architect",
-    model: "deepseek/deepseek-r1:free",
-    descFa: "طراحی اسکیمای رابطه‌ای، مدل‌های Pydantic v2، اعتبارسنجی فیلدها و ایندکس‌گذاری.",
-    descEn: "Normalized relational schemas, Pydantic v2 data models in models.py, and indexing strategies.",
-  },
-  {
-    id: "backend_agent",
-    role: "backend_agent",
-    codename: "Vulcan",
-    badge: "⚡",
-    roleTitleFa: "مهندس ارشد بک‌اند",
-    roleTitleEn: "Backend Engineer",
-    model: "qwen/qwen-2.5-coder-32b-instruct:free",
-    descFa: "پیاده‌سازی وب‌سرویس ناهمگام FastAPI، روت‌های CRUD، میان‌افزار CORS و رانتایم.",
-    descEn: "Asynchronous FastAPI microservice, CRUD endpoints, CORS middleware, and standalone execution in main.py.",
-  },
-  {
-    id: "ui_ux_agent",
-    role: "ui_ux_agent",
-    codename: "Pixel",
-    badge: "🎨",
-    roleTitleFa: "طراح رابط و تجربه کاربری",
-    roleTitleEn: "UI/UX Designer",
-    model: "google/gemini-2.0-flash-exp:free",
-    descFa: "طراحی سیستم گلاسمورفیسم تیره، توکن‌های CSS، راست‌چین و تایپوگرافی استاندارد.",
-    descEn: "Obsidian dark glassmorphism design system, CSS design tokens, and native RTL typography.",
-  },
-  {
-    id: "frontend_agent",
-    role: "frontend_agent",
-    codename: "Prism",
-    badge: "💎",
-    roleTitleFa: "مهندس ارشد فرانت‌اند",
-    roleTitleEn: "Frontend Engineer",
-    model: "google/gemini-2.0-flash-exp:free",
-    descFa: "توسعه داشبورد وب تک‌صفحه‌ای (SPA)، اتصال بی‌درنگ به اندپوینت‌های بک‌اند و تعامل آنی.",
-    descEn: "Interactive standalone SPA in index.html, async fetch integration, and reactive state management.",
-  },
-  {
-    id: "security_agent",
-    role: "security_agent",
-    codename: "Cipher",
-    badge: "🛡️",
-    roleTitleFa: "بازرس ارشد امنیت",
-    roleTitleEn: "Security Auditor",
-    model: "mistralai/mistral-small-24b-instruct-2501:free",
-    descFa: "تحلیل تهدیدات OWASP Top 10، اعتبارسنجی ورودی‌ها، مقابله با XSS و گزارش امنیت.",
-    descEn: "OWASP Top 10 threat modeling, input sanitization, CORS security, and security_audit.md.",
-  },
-  {
-    id: "devops_agent",
-    role: "devops_agent",
-    codename: "Orbit",
-    badge: "🚀",
-    roleTitleFa: "مهندس دواپس و زیرساخت",
-    roleTitleEn: "DevOps Engineer",
-    model: "qwen/qwen-2.5-coder-32b-instruct:free",
-    descFa: "پین دقیق نسخه‌های requirements.txt و تدوین راهنمای جامع و آسان README.md.",
-    descEn: "Deterministic dependency pinning in requirements.txt, deployment guides, and README.md runbook.",
-  },
-  {
-    id: "mobile_agent",
-    role: "mobile_agent",
-    codename: "Nova",
-    badge: "✨",
-    roleTitleFa: "بازبین کیفیت و استاندارد کد",
-    roleTitleEn: "Code Reviewer & Quality",
-    model: "qwen/qwen-2.5-coder-32b-instruct:free",
-    descFa: "بازبینی کدهای پایتون بر اساس PEP8، اصول Clean Code و گزارش سلامت کیفی کد.",
-    descEn: "PEP8 compliance, static type audit, cyclomatic complexity reduction, and code_review.md.",
-  },
-  {
-    id: "qa_agent",
-    role: "qa_agent",
-    codename: "Sentinel",
-    badge: "⚔️",
-    roleTitleFa: "مهندس ارشد آزمون و ترمینال",
-    roleTitleEn: "QA & Verification Engineer",
-    model: "mistralai/mistral-small-24b-instruct-2501:free",
-    descFa: "اجرای کامپایل ترمینال پایتون، راستی‌آزمایی رانتایم و صدور تاییدیه کیفی نهایی.",
-    descEn: "Terminal bytecode compilation (py_compile), headless import sanity check, and QA certification.",
-  },
-];
 
 const ProjectDetail: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
@@ -185,6 +39,9 @@ const ProjectDetail: React.FC = () => {
   const [termOutput, setTermOutput] = useState<string>("$ NexusForge Terminal Ready\n$ Enter command or select quick action.\n");
   const [termRunning, setTermRunning] = useState(false);
 
+  // Tasks State
+  const [tasks, setTasks] = useState<Task[]>([]);
+
   // Execution / Build State
   const [isRunning, setIsRunning] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
@@ -212,6 +69,14 @@ const ProjectDetail: React.FC = () => {
         (m): m is ProjectMessage => Boolean(m && m.id && m.sender)
       );
       setMessages(safeMsgs);
+
+      // Load Tasks
+      try {
+        const tList = await taskApi.getAllByProject(projectId);
+        setTasks(tList || []);
+      } catch {
+        setTasks([]);
+      }
 
       // Load Files & Traces
       await refreshFiles();
@@ -516,65 +381,71 @@ const ProjectDetail: React.FC = () => {
         </div>
       </header>
 
-      {/* 2. VISUAL 12-AGENT HANDOFF PIPELINE */}
+      {/* 2. REAL TASK PIPELINE */}
       <section className="pipeline-container">
         <div className="pipeline-header-bar">
           <div className="pipeline-title-group">
             <span className="pipeline-indicator-dot"></span>
             <span className="pipeline-title">
-              {isFa ? "پایپ‌لاین پاس‌کاری و بازرسی ۱۲ ایجنت تخصصی (Supervised by Arya 👑)" : "12-Agent Autonomous Pipeline (Supervised by Arya 👑)"}
+              {isFa ? "پایپ‌لاین وظایف و وضعیت اجرا" : "Task Execution Pipeline"}
             </span>
           </div>
           <span className="pipeline-badge">
-            {isRunning ? (isFa ? "⚡ در حال گردش و بررسی تسک‌ها" : "⚡ Active Execution Flow") : (isFa ? "۱۲ ایجنت آنلاین" : "12 Agents Online")}
+            {tasks.length} {isFa ? "تسک ثبت‌شده" : "Tasks Registered"}
           </span>
         </div>
 
         <div className="pipeline-scroll-track">
-          {SQUAD_12_AGENTS.map((agent, index) => {
-            const isActive = isRunning && activePipelineStep === index;
-            const isCompleted = isRunning && activePipelineStep > index;
+          {tasks.length === 0 ? (
+            <div style={{ padding: "0.75rem 1rem", color: "#94A3B8", fontSize: "0.85rem" }}>
+              {isFa ? "هنوز تسکی در این پروژه ثبت نشده است." : "No tasks created for this project yet."}
+            </div>
+          ) : (
+            tasks.map((task, index) => {
+              const isActive = task.status === "running";
+              const isCompleted = task.status === "completed";
+              const isFailed = task.status === "failed";
 
-            return (
-              <React.Fragment key={agent.id}>
-                <div
-                  className={`pipeline-node ${isActive ? "active" : ""} ${isCompleted ? "completed" : ""}`}
-                  onClick={() => setActiveTab("models")}
-                  title={`${agent.badge} ${agent.codename} — ${isFa ? agent.roleTitleFa : agent.roleTitleEn}`}
-                >
-                  <div className="node-avatar-wrapper">
-                    <span className="node-badge">{agent.badge}</span>
-                    {isActive && <span className="node-pulse-ring"></span>}
-                    {isCompleted && <span className="node-check-badge">✓</span>}
+              return (
+                <React.Fragment key={task.id}>
+                  <div
+                    className={`pipeline-node ${isActive ? "active" : ""} ${isCompleted ? "completed" : ""} ${isFailed ? "failed" : ""}`}
+                    title={`${task.title} (${task.status})`}
+                  >
+                    <div className="node-avatar-wrapper">
+                      <span className="node-badge">
+                        {isCompleted ? "✓" : isFailed ? "✗" : isActive ? "⚡" : "⏳"}
+                      </span>
+                    </div>
+                    <div className="node-info">
+                      <span className="node-codename">{task.title.slice(0, 24)}</span>
+                      <span className="node-role">{task.status}</span>
+                    </div>
                   </div>
-                  <div className="node-info">
-                    <span className="node-codename">{agent.codename}</span>
-                    <span className="node-role">{isFa ? agent.roleTitleFa : agent.roleTitleEn}</span>
-                  </div>
-                </div>
 
-                {index < SQUAD_12_AGENTS.length - 1 && (
-                  <div className={`pipeline-connector ${isCompleted ? "active" : ""}`}>
-                    <span className="connector-line"></span>
-                    <span className="connector-arrow">➔</span>
-                  </div>
-                )}
-              </React.Fragment>
-            );
-          })}
+                  {index < tasks.length - 1 && (
+                    <div className={`pipeline-connector ${isCompleted ? "active" : ""}`}>
+                      <span className="connector-line"></span>
+                      <span className="connector-arrow">➔</span>
+                    </div>
+                  )}
+                </React.Fragment>
+              );
+            })
+          )}
         </div>
       </section>
 
-      {/* 3. SPLIT WORKSPACE: LEFT = CHAT (HERMES / ARYA), RIGHT = FILES & TOOLS */}
+      {/* 3. SPLIT WORKSPACE: LEFT = ASSISTANT CHAT, RIGHT = FILES & TOOLS */}
       <main className="studio-main">
-        {/* LEFT COLUMN: HERMES & ARYA COPILOT CHAT */}
+        {/* LEFT COLUMN: ASSISTANT CHAT */}
         <section className="studio-chat-pane">
           <div className="chat-header">
             <div className="hermes-badge">
-              <span className="hermes-avatar">👑</span>
+              <span className="hermes-avatar">⚡</span>
               <div>
-                <h4>{isFa ? "👑 آریا — معمار ارشد و هدایتگر کل" : "👑 Arya — Chief Architect & Orchestrator"}</h4>
-                <p>{isFa ? "هم‌صحبتی فارسی، هدایت فنی ۱۱ ایجنت تخصصی و تضمین کیفیت" : "Persian User Liaison & 12-Agent Technical Lead"}</p>
+                <h4>{isFa ? "دستیار فنی نکسوس‌فورج" : "NexusForge Assistant"}</h4>
+                <p>{isFa ? "راهنمای معماری و مدیریت فضای کاری پروژه" : "Technical Assistant & Workspace Liaison"}</p>
               </div>
             </div>
             <button className="btn-refresh-chat" onClick={fetchProjectData} title={isFa ? "بروزرسانی چت" : "Refresh Chat"}>
@@ -589,7 +460,7 @@ const ProjectDetail: React.FC = () => {
               <div key={msg.id} className={`message-bubble ${msg.sender || "system"}`}>
                 <div className="message-header">
                   <span className="message-sender-name">
-                    {msg.sender === "hermes" ? "👑 Arya (هدایتگر ارشد)" : (isFa ? "شما" : "You")}
+                    {msg.sender === "hermes" ? (isFa ? "دستیار نکسوس‌فورج" : "NexusForge Assistant") : (isFa ? "شما" : "You")}
                   </span>
                   <span className="message-time">
                     {msg.created_at ? new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
@@ -629,7 +500,7 @@ const ProjectDetail: React.FC = () => {
             <input
               type="text"
               className="chat-input"
-              placeholder={isFa ? "با آریا گفتگو کنید یا تسک جدیدی بخواهید (Enter برای ارسال)..." : "Talk with Arya or request changes (Enter to send)..."}
+              placeholder={isFa ? "با دستیار گفتگو کنید یا تسک جدیدی بخواهید (Enter برای ارسال)..." : "Message assistant or request changes (Enter to send)..."}
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
               onKeyDown={(e) => {
@@ -747,57 +618,60 @@ const ProjectDetail: React.FC = () => {
               </div>
             )}
 
-            {/* 2. REASONING TRACES (ALL 12 AGENTS) */}
+            {/* 2. REASONING TRACES */}
             {activeTab === "traces" && (
               <div className="traces-container">
                 <div className="traces-header-banner">
-                  <h4>🧠 {isFa ? "زنجیره تفکر و نظرات بازبینی آریا (12-Agent Reasoning & Review Trace)" : "12-Agent Reasoning & Arya Review Trace"}</h4>
+                  <h4>🧠 {isFa ? "لاگ تحلیلی اجرای تسک‌ها" : "Task Execution Traces"}</h4>
                   <p>
                     {isFa
-                      ? "آریا (👑) خروجی تک‌تک ۱۱ ایجنت تخصصی را بازرسی کرده و تاییدیه پیشرفت را صادر می‌کند."
-                      : "Arya relentlessly scrutinizes every specialist deliverable before stamping approval."}
+                      ? "ردیابی دقیق و گام‌به‌گام مراحل تحلیل و اجرای تسک‌ها در ورکر."
+                      : "Detailed trace logs captured during task execution by worker nodes."}
                   </p>
                 </div>
 
                 <div className="traces-list">
-                  {(traces.length > 0 ? traces : SQUAD_12_AGENTS).map((tItem: any, idx: number) => {
-                    const isFromSquad = !tItem.thoughts;
-                    const name = tItem.agent_name || `${tItem.codename} (${isFa ? tItem.roleTitleFa : tItem.roleTitleEn}) ${tItem.badge}`;
-                    const badge = tItem.badge || "🤖";
-                    const model = tItem.model || "OpenRouter Free";
-                    const duration = tItem.duration || "1.2s";
-                    const thoughts = tItem.thoughts || [
-                      isFa ? `دریافت تسک و تحلیل دقیق بر اساس استانداردهای ${tItem.codename}` : `Received task and analyzed according to standards.`,
-                      isFa ? `تولید دلیوربل تخصصی و ارسال به آریا جهت بازرسی کیفی` : `Generated specialized deliverable and submitted to Arya for review.`
-                    ];
+                  {traces.length === 0 ? (
+                    <div style={{ padding: "3rem", textAlign: "center", color: "#94A3B8" }}>
+                      <p>{isFa ? "هنوز لاگ اجرایی برای این پروژه ثبت نشده است." : "No execution traces recorded yet."}</p>
+                    </div>
+                  ) : (
+                    traces.map((tItem: any, idx: number) => {
+                      const name = tItem.agent_name || tItem.role || "Worker Agent";
+                      const badge = tItem.badge || "⚡";
+                      const duration = tItem.duration ? `${tItem.duration}s` : "";
+                      const thoughts = tItem.thoughts || [];
 
-                    return (
-                      <div key={idx} className="trace-card">
-                        <div className="trace-card-top">
-                          <div className="trace-agent-identity">
-                            <span className="trace-badge">{badge}</span>
-                            <span className="trace-name">{name}</span>
-                            <span className="trace-duration">⏱ {duration}</span>
+                      return (
+                        <div key={idx} className="trace-card">
+                          <div className="trace-card-top">
+                            <div className="trace-agent-identity">
+                              <span className="trace-badge">{badge}</span>
+                              <span className="trace-name">{name}</span>
+                              {duration && <span className="trace-duration">⏱ {duration}</span>}
+                            </div>
+                            {tItem.model && <span className="trace-model-pill">{tItem.model}</span>}
                           </div>
-                          <span className="trace-model-pill">{model}</span>
-                        </div>
 
-                        <div className="trace-thoughts">
-                          <span className="trace-label">{isFa ? "فرآیند تحلیل و تفکر (Thoughts):" : "Analysis & Reasoning:"}</span>
-                          <ul>
-                            {thoughts.map((th: string, tIdx: number) => (
-                              <li key={tIdx}>{th}</li>
-                            ))}
-                          </ul>
-                        </div>
+                          {thoughts.length > 0 && (
+                            <div className="trace-thoughts">
+                              <span className="trace-label">{isFa ? "تحلیل و مراحل اجرا:" : "Execution Steps:"}</span>
+                              <ul>
+                                {thoughts.map((th: string, tIdx: number) => (
+                                  <li key={tIdx}>{th}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
 
-                        <div className="trace-verdict">
-                          <span className="verdict-tag">✓ {isFa ? "تایید بازبینی آریا 👑" : "Arya Review Approved 👑"}</span>
-                          <span className="verdict-desc">{tItem.output_title || (isFa ? "خروجی با موفقیت اعتبارسنجی شد" : "Deliverable verified")}</span>
+                          <div className="trace-verdict">
+                            <span className="verdict-tag">{tItem.status || "Completed"}</span>
+                            {tItem.output_title && <span className="verdict-desc">{tItem.output_title}</span>}
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })
+                  )}
                 </div>
               </div>
             )}
@@ -806,62 +680,60 @@ const ProjectDetail: React.FC = () => {
             {activeTab === "terminal" && (
               <div className="terminal-container">
                 <div className="terminal-presets">
-                  <span className="preset-label">{isFa ? "دستورات سریع شل:" : "Quick Actions:"}</span>
-                  <button className="preset-btn" onClick={() => handleRunTerminal("dir")}>dir</button>
-                  <button className="preset-btn" onClick={() => handleRunTerminal("python -m py_compile main.py models.py")}>py_compile main.py</button>
-                  <button className="preset-btn" onClick={() => handleRunTerminal("python -c \"import main; print('FastAPI Ready')\"")}>test import</button>
-                  <button className="preset-btn" onClick={() => handleRunTerminal("type requirements.txt")}>type requirements.txt</button>
+                  <span className="preset-label">{isFa ? "اطلاعیه امنیتی:" : "Security Notice:"}</span>
                 </div>
                 <div className="terminal-output-box">
-                  <pre>{termOutput}</pre>
-                </div>
-                <div className="terminal-input-bar">
-                  <span className="terminal-prompt">$</span>
-                  <input
-                    type="text"
-                    className="terminal-input"
-                    value={termCommand}
-                    onChange={(e) => setTermCommand(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && handleRunTerminal()}
-                    placeholder="Type shell command..."
-                    disabled={termRunning}
-                  />
-                  <button
-                    className="terminal-exec-btn"
-                    onClick={() => handleRunTerminal()}
-                    disabled={termRunning || !termCommand.trim()}
-                  >
-                    {termRunning ? "..." : (isFa ? "اجرا" : "Run")}
-                  </button>
+                  <pre style={{ color: "#F87171" }}>
+                    {isFa
+                      ? "$ دسترسی مستقیم به ترمینال شل میزبان به دلایل امنیتی غیرفعال است.\n$ اجرای دستورات صرفاً از طریق ورکرها در کانتینرهای ایزوله مجاز می‌باشد."
+                      : "$ Direct host terminal execution is permanently disabled for security.\n$ Subprocess execution is restricted to isolated worker containers."}
+                  </pre>
                 </div>
               </div>
             )}
 
-            {/* 4. ASSIGNED 12-AGENT SQUAD */}
+            {/* 4. PROJECT METADATA & CONFIGURATION */}
             {activeTab === "models" && (
               <div className="models-container">
                 <div className="models-info-banner">
-                  <h4>🤖 {isFa ? "تیم ۱۲ ایجنتی تخصصی نکسوس‌فورج و مدل‌های رایگان" : "NexusForge 12-Agent Specialized Squad"}</h4>
+                  <h4>⚙️ {isFa ? "مشخصات و پیکربندی پروژه" : "Project Configuration & Metadata"}</h4>
                   <p>
                     {isFa
-                      ? "آریا (👑) تسک‌های تخصصی را به این ۱۱ مهندس واگذار کرده و خروجی تک‌تک آن‌ها را با وسواس کنترل می‌کند."
-                      : "Arya assigns tasks to these 11 specialized engineers and scrutinizes every output."}
+                      ? "اطلاعات پایه‌ای فضای کاری، مدل و تنظیمات ثبت‌شده در دیتابیس."
+                      : "Core workspace directory, provider settings, and metadata recorded in the database."}
                   </p>
                 </div>
 
                 <div className="models-grid">
-                  {SQUAD_12_AGENTS.map((item, idx) => (
-                    <div key={idx} className="model-agent-card">
-                      <div className="card-top">
-                        <span className="agent-badge-name">{item.badge} {item.codename}</span>
-                        <span className="role-tag">{isFa ? item.roleTitleFa : item.roleTitleEn}</span>
-                      </div>
-                      <div className="model-code-box">
-                        <code>{item.model}</code>
-                      </div>
-                      <p className="model-desc">{isFa ? item.descFa : item.descEn}</p>
+                  <div className="model-agent-card">
+                    <div className="card-top">
+                      <span className="agent-badge-name">📁 {isFa ? "پوشه کاری پروژه" : "Workspace Path"}</span>
                     </div>
-                  ))}
+                    <div className="model-code-box">
+                      <code>{project?.workspace_path || `workspaces/${project?.id}`}</code>
+                    </div>
+                    <p className="model-desc">{isFa ? "مسیر فایل‌های واقعی تولید شده روی دیسک" : "Canonical directory on filesystem for project artifacts."}</p>
+                  </div>
+
+                  <div className="model-agent-card">
+                    <div className="card-top">
+                      <span className="agent-badge-name">🤖 {isFa ? "تأمین‌کننده مدل" : "AI Provider"}</span>
+                    </div>
+                    <div className="model-code-box">
+                      <code>{project?.ai_provider || "Standard Runtime"}</code>
+                    </div>
+                    <p className="model-desc">{isFa ? "سرویس یا مدل انتخابی برای تحلیل و هدایت" : "Configured LLM inference backend."}</p>
+                  </div>
+
+                  <div className="model-agent-card">
+                    <div className="card-top">
+                      <span className="agent-badge-name">🌐 {isFa ? "زبان پیش‌فرض" : "Language Setting"}</span>
+                    </div>
+                    <div className="model-code-box">
+                      <code>{project?.preferred_language || "fa"}</code>
+                    </div>
+                    <p className="model-desc">{isFa ? "زبان پیش‌فرض ارتباطات و مستندات" : "Primary language for deliverables and interaction."}</p>
+                  </div>
                 </div>
               </div>
             )}

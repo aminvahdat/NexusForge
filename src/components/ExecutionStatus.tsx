@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { ExecutionStatus as ExecStatus, WorkerStatus } from "../types";
 import { Skeleton } from "./Skeleton";
-import "./ExecutionStatus.css";
 
 /* ExecutionStatus — Phase 5.5 Enhanced
    Real-time status badge with animations, connection indicator,

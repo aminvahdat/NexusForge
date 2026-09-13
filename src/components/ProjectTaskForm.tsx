@@ -1,6 +1,5 @@
 import React, { useState } from "react";
 import { TaskCreate, AgentRole, Priority, TaskStatus } from "../types";
-import "./TaskForm.css";
 
 interface TaskFormProps {
   projectId: string;

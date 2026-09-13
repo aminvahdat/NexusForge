@@ -61,8 +61,10 @@ const Login: React.FC = () => {
       );
       
       if (response.data.access_token) {
-        // Store token if needed, then redirect
         localStorage.setItem("token", response.data.access_token);
+        if (formData.email) {
+          localStorage.setItem("user_email", formData.email);
+        }
         navigate("/");
       }
     } catch (err: any) {

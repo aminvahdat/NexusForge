@@ -71,17 +71,17 @@ const Dashboard: React.FC = () => {
         preferred_language: lang,
       });
 
-      // 2. Create task assigned to Arya (Chief Orchestrator)
+      // 2. Create initial project task
       await taskApi.create(createdProject.id, {
-        title: isFa ? `هدایت کل: ${cleanName}` : `Orchestrate: ${cleanName}`,
+        title: isFa ? `راه‌اندازی پروژه: ${cleanName}` : `Initialize: ${cleanName}`,
         description: promptText,
-        role: "chief_orchestrator",
+        role: "orchestrator",
         priority: "high",
         status: "queued",
-        required_skills: ["orchestration", "architecture", "task_delegation"],
+        required_skills: ["architecture", "execution"],
         acceptance_criteria: [
-          isFa ? "شکست تسک‌ها و تفویض به ۱۱ ایجنت تخصصی" : "Task breakdown and delegation to 11 specialists",
-          isFa ? "تولید کدهای واقعی و راستی‌آزمایی در ترمینال شل" : "Code synthesis and terminal verification"
+          isFa ? "تحلیل نیازمندی‌ها و سازماندهی فضای کاری" : "Requirements analysis and workspace setup",
+          isFa ? "تولید کدهای واقعی و راستی‌آزمایی خروجی" : "Code synthesis and deliverable verification"
         ]
       });
 
@@ -164,8 +164,8 @@ const Dashboard: React.FC = () => {
           </h1>
           <p className="dashboard__subtitle">
             {isFa
-              ? "ایده یا تسک خود را بنویسید؛ تیم ۱۲ ایجنتی هوشمند پروژه را از صفر تا صد می‌سازد."
-              : "Describe your project; our 12 specialized autonomous agents will design, build, and verify it."}
+              ? "ایده یا تسک خود را بنویسید؛ نکسوس‌فورج مراحل معماری و اجرای واقعی را مدیریت می‌کند."
+              : "Describe your project; NexusForge coordinates task execution and deliverables."}
           </p>
         </div>
         <div className="dashboard__header-actions">
@@ -182,14 +182,14 @@ const Dashboard: React.FC = () => {
       {/* 2. FRIENDLY HERO PROMPT CARD */}
       <section className="hero-forge-clean">
         <div className="hero-forge-header">
-          <span className="hero-tag">⚡ {isFa ? "شروع آنی با تیم ۱۲ ایجنتی" : "Instant 12-Agent Start"}</span>
+          <span className="hero-tag">⚡ {isFa ? "شروع آنی پروژه" : "Instant Start"}</span>
           <h2 className="hero-title">
             {isFa ? "چه نرم‌افزاری می‌خواهید بسازید؟" : "What software do you want to build today?"}
           </h2>
           <p className="hero-desc">
             {isFa
-              ? "کافیست ایده خود را به زبان ساده بنویسید. آریا (👑) نیازمندی‌ها را تحلیل کرده و به ۱۱ مهندس متخصص تفویض می‌کند."
-              : "Simply type your objective. Arya (👑) will break it down and coordinate 11 specialized engineers."}
+              ? "کافیست ایده خود را به زبان ساده بنویسید. نکسوس‌فورج تسک‌های پروژه را ایجاد و آماده اجرا می‌کند."
+              : "Simply type your objective. NexusForge will structure tasks and prepare execution."}
           </p>
         </div>
 
@@ -215,8 +215,8 @@ const Dashboard: React.FC = () => {
 
             <div className="hero-bar-footer">
               <div className="hero-lead-badge">
-                <span>👑</span>
-                <span>{isFa ? "هدایتگر ارشد: آریا (فهم فارسی و کنترل کیفی)" : "Chief Orchestrator: Arya"}</span>
+                <span>⚡</span>
+                <span>{isFa ? "دستیار هوشمند نکسوس‌فورج" : "NexusForge Assistant"}</span>
               </div>
               <button
                 type="submit"

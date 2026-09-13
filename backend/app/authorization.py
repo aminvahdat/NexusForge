@@ -1,57 +1,47 @@
-"""Authorization module for NexusForge — RBAC layer."""
+"""Authorization module for NexusForge — Ownership verification and access control."""
 
-from typing import Optional, List
-from functools import wraps
+from typing import Optional, Union
+import uuid
 from fastapi import Depends, HTTPException, status
 
-# RBAC Roles and Permissions
-ROLES = {
-    "admin": ["*"],
-    "chief_orchestrator": ["*"],
-    "project_planner": ["*"],
-    "software_architect": ["*"],
-    "research_agent": ["*"],
-    "ui_ux_agent": ["*"],
-    "frontend_agent": ["*"],
-    "backend_agent": ["*"],
-    "mobile_agent": ["*"],
-    "database_agent": ["*"],
-    "security_agent": ["*"],
-    "qa_agent": ["*"],
-    "devops_agent": ["*"],
-}
+from app.models import User
+from app.auth import get_current_user
 
-def require_role(role: str):
-    """Guard: user must have the specified role."""
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            return func(*args, **kwargs)
-        return wrapper
-    return decorator
 
-def check_ownership(resource_owner_id: str, user_id: str) -> bool:
-    """Enforce resource ownership: user must own or be admin."""
-    return resource_owner_id == user_id or user_id == "admin"
-
-def can_access(user_id: str, resource_id: str, resource_owner_id: str) -> bool:
-    """Ownership + role check for any resource."""
-    return check_ownership(resource_owner_id, user_id)
-
-class RBAC:
-    """Role-Based Access Control engine."""
-    def __init__(self, user_id: str, roles: List[str]):
-        self.user_id = user_id
-        self.roles = roles
-
-    def has_permission(self, permission: str) -> bool:
-        """Check if user has a given permission via any role."""
-        for role in self.roles:
-            perms = ROLES.get(role, [])
-            if "*" in perms or permission in perms:
-                return True
+def check_ownership(resource_owner_id: Union[str, uuid.UUID, None], user: User) -> bool:
+    """Verify if user owns the resource or is a superuser.
+    
+    FAILS CLOSED:
+    Returns True ONLY if user is a superuser OR resource_owner_id matches user.id.
+    Never matches arbitrary strings like 'admin'.
+    """
+    if not user or not user.is_active:
         return False
+    if getattr(user, "is_superuser", False):
+        return True
+    if not resource_owner_id:
+        return False
+    return str(resource_owner_id) == str(user.id)
 
-    def can_access_resource(self, resource_owner_id: str) -> bool:
-        """Can access if owner or admin."""
-        return check_ownership(resource_owner_id, self.user_id)
+
+def enforce_ownership(
+    resource_owner_id: Union[str, uuid.UUID, None],
+    user: User,
+    resource_name: str = "resource",
+) -> None:
+    """Enforce ownership or raise 403 Forbidden."""
+    if not check_ownership(resource_owner_id, user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Forbidden: You do not have permission to access this {resource_name}",
+        )
+
+
+async def require_superuser(user: User = Depends(get_current_user)) -> User:
+    """Dependency: require user to be an active superuser."""
+    if not user.is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden: Administrative privileges required",
+        )
+    return user

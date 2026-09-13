@@ -21,7 +21,7 @@ from pathlib import Path
 import structlog
 
 from app.config.settings import get_settings
-from app.models.task import Task
+from app.models import Task
 from app.models.enums import AgentRole, WorkerStatus
 
 logger = structlog.get_logger()

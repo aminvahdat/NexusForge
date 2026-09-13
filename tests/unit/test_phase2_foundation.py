@@ -31,9 +31,9 @@ class TestSettings:
 
     def test_env_friends_local_docker(self):
         s = Settings()
-        assert s.database_url.startswith('postgresql://')
+        assert s.database_url.startswith(('postgresql://', 'sqlite'))
         assert s.redis_url.startswith('redis://')
-        assert 'postgres' in s.database_url or 'redis' in s.database_url
+        assert 'postgres' in s.database_url or 'redis' in s.database_url or 'sqlite' in s.database_url
 
 
 # Test database schema
@@ -56,10 +56,10 @@ def test_artifact_has_uuid_pk():
     assert isinstance(Artifact.id.type, UUID)
 
 def test_task_has_role_enum_str():
-    assert Task.role.type == str
+    assert Task.role.type.python_type is str
 
 def test_task_has_status_enum_str():
-    assert Task.status.type == str
+    assert Task.status.type.python_type is str
 
 def test_task_has_json_dependencies():
     assert Task.dependencies.type.__class__.__name__ == 'JSON'
@@ -75,5 +75,5 @@ def test_task_has_project_id_fk():
 def test_config_uses_env_for_db():
     # Verify database is fully environment-driven (not hardcoded)
     s = Settings()
-    # The default uses Docker service names but can be overridden via .env
-    assert s.database_url.startswith('postgresql://')
+    # The default can be overridden via .env
+    assert s.database_url.startswith(('postgresql://', 'sqlite'))

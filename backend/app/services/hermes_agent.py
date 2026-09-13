@@ -20,37 +20,32 @@ from app.models import Project, ProjectMessage, UserAPIKey
 
 logger = logging.getLogger("hermes_agent")
 
-# Curated Default Free Models (OpenRouter Free Tier)
+# Curated Recommended Models by Role
 DEFAULT_FREE_MODELS: Dict[str, Dict[str, str]] = {
     "orchestrator": {
-        "role_title": "هدایتگر ارشد (Chief Orchestrator)",
-        "agent": "Arya 👑",
+        "role_title": "هدایتگر و برنامه‌ریز (Orchestrator)",
         "model": "meta-llama/llama-3.3-70b-instruct:free",
-        "reason": "مدل قدرتمند Llama 3.3 70B با استدلال بالا جهت برنامه‌ریزی، WBS و هماهنگی ایجنت‌ها"
+        "reason": "Llama 3.3 70B for task planning and coordination"
     },
     "architect": {
         "role_title": "معمار سیستم (System Architect)",
-        "agent": "Synapse 🏛️",
         "model": "deepseek/deepseek-r1:free",
-        "reason": "مدل استنتاجی و تحلیلی DeepSeek-R1 برای تفکیک ماژولار و قراردادهای دیتابیس و API"
+        "reason": "DeepSeek-R1 for modular architecture and schema contracts"
     },
     "backend": {
-        "role_title": "موتور کدنویسی بک‌اند (Backend Coder)",
-        "agent": "Vulcan ⚡",
+        "role_title": "توسعه بک‌اند (Backend Coder)",
         "model": "qwen/qwen-2.5-coder-32b-instruct:free",
-        "reason": "مدل فوق‌العاده تخصصی Qwen 2.5 Coder 32B برای تولید کدهای تمیز، بدون باگ و سریع"
+        "reason": "Qwen 2.5 Coder 32B for clean backend services"
     },
     "frontend": {
-        "role_title": "طراح رابط کاربری (UI/UX Coder)",
-        "agent": "Prism 💎",
+        "role_title": "رابط کاربری (UI/UX Coder)",
         "model": "google/gemini-2.0-flash-exp:free",
-        "reason": "مدل پرسرعت و خلاق Gemini 2.0 Flash برای طراحی واسط‌های مدرن و استایل‌های گلاسمورفیک"
+        "reason": "Gemini 2.0 Flash for web interface development"
     },
     "qa": {
-        "role_title": "مهندس آزمون و کیفیت (QA & Testing)",
-        "agent": "Sentinel ⚔️",
+        "role_title": "آزمون و کیفیت (QA & Testing)",
         "model": "mistralai/mistral-small-24b-instruct-2501:free",
-        "reason": "مدل دقیق Mistral Small برای بازبینی امنیتی، اعتبارسنجی کدها و سناریوهای تست"
+        "reason": "Mistral Small for verification and code review"
     },
 }
 
@@ -90,47 +85,31 @@ class HermesAgentService:
 
         if use_fa:
             greeting = (
-                f"سلام! من **هرمس (Hermes)**، ایجنت معمار ارشد و هماهنگ‌کننده پروژه شما هستم.\n\n"
-                f"پروژه شما تحت عنوان **«{p_name}»** را با دقت بررسی کردم. "
-                f"برای اینکه تیم ایجنت‌ها کدی دقیق، کاربردی و منطبق بر نیاز واقعی شما در پوشه کاری تولید کنند، "
+                f"سلام! من دستیار هوشمند پروژه **«{p_name}»** در نکسوس‌فورج هستم.\n\n"
+                f"هدف پروژه شما بررسی شد. برای اینکه کدی دقیق، کاربردی و منطبق بر نیاز واقعی شما در پوشه کاری تولید شود، "
                 f"لطفاً نظرتان را در مورد این ۳ سوال کلیدی بفرمایید:\n\n"
                 f"1. **زبان و فریم‌ورک پایه:** آیا ترجیح شما پایتون (مثلاً FastAPI / Flask) است یا استک دیگری مدنظر دارید؟\n"
                 f"2. **پایگاه داده و ذخیره‌سازی:** آیا سیستم نیاز به ذخیره‌سازی پایدار (مانند SQLite خودکار یا دیتابیس خاص) دارد؟\n"
                 f"3. **رابط کاربری:** آیا مایلید یک داشبورد تک‌صفحه‌ای وب شیک و واکنش‌گرا (HTML/CSS) برای کنترل این سیستم طراحی و اضافه شود؟\n\n"
-                f"💡 **تخصیص مدل‌های پیش‌فرض رایگان:**\n"
-                f"من برای اینکه بدون هزینه بهترین خروجی را بگیرید، ترکیب مدل‌های زیر را برای تیم تنظیم کرده‌ام:\n"
-                f"• **آریا (هدایتگر):** `Llama 3.3 70B (Free)`\n"
-                f"• **سیناپس (معماری):** `DeepSeek R1 (Free)`\n"
-                f"• **ولکان (کدنویسی بک‌اند):** `Qwen 2.5 Coder 32B (Free)`\n"
-                f"• **پریزم (رابط کاربری):** `Gemini 2.0 Flash (Free)`\n"
-                f"• **سنتینل (تست و کیفیت):** `Mistral Small 24B (Free)`\n\n"
                 f"می‌توانید پاسخ سوالات را تایپ کنید، یا از گزینه‌های سریع زیر انتخاب کنید یا مستقیماً دکمه «🚀 ساخت و اجرا» را بزنید!"
             )
             quick_chips = [
-                "🚀 با بهترین تنظیمات رایگان بساز و اجرا کن",
+                "🚀 با تنظیمات پیش‌فرض بساز و اجرا کن",
                 "⚡ بک‌اند پایتون FastAPI + دیتابیس SQLite",
                 "💎 همراه با داشبورد وب شیک و واکنش‌گرا",
                 "🛠️ فقط یک اسکریپت سبک و سریع تولید کن"
             ]
         else:
             greeting = (
-                f"Hello! I am **Hermes**, your Chief AI Architect and project coordinator.\n\n"
-                f"I've analyzed your project goal: **\"{p_name}\"**.\n"
-                f"Before our squad begins generating the production code in your workspace, "
-                f"could you clarify 3 quick details?\n\n"
+                f"Hello! I am your technical project assistant for **\"{p_name}\"**.\n\n"
+                f"Before generating production code in your workspace, could you clarify 3 quick details?\n\n"
                 f"1. **Core Tech Stack:** Do you prefer Python (FastAPI / Flask) or another runtime?\n"
                 f"2. **Data Persistence:** Does this require an embedded database (like SQLite) or in-memory state?\n"
                 f"3. **User Interface:** Would you like a responsive single-page web dashboard to interact with the system?\n\n"
-                f"💡 **Assigned Default Free Models:**\n"
-                f"• **Arya (Orchestrator):** `Llama 3.3 70B (Free)`\n"
-                f"• **Synapse (Architect):** `DeepSeek R1 (Free)`\n"
-                f"• **Vulcan (Backend):** `Qwen 2.5 Coder 32B (Free)`\n"
-                f"• **Prism (UI/UX):** `Gemini 2.0 Flash (Free)`\n"
-                f"• **Sentinel (QA):** `Mistral Small (Free)`\n\n"
                 f"Reply here or click any of the quick suggestions below to start!"
             )
             quick_chips = [
-                "🚀 Build with default free models",
+                "🚀 Build with default settings",
                 "⚡ Python FastAPI + SQLite DB",
                 "💎 Include modern Web Dashboard",
                 "🛠️ Lightweight CLI script only"
@@ -186,36 +165,34 @@ class HermesAgentService:
         full_context = f"{project.name} {project.description or ''} {user_clean}"
         stack = detect_tech_stack(full_context)
 
-        # 2. Formulate Hermes response
+        # 2. Formulate response
         if is_build_request:
             if use_fa:
                 hermes_reply = (
                     f"بسیار عالی! تمام ترجیحات شما دریافت و در نقشه معماری ثبت شد. 🎯\n\n"
                     f"استک انتخابی پروژه: **{stack['language_title']}** ({stack['framework']})\n\n"
-                    f"تیم ۱۲ نفره ایجنت‌ها با هدایت **آریا (Arya 👑)** هم‌اکنون در پوشه کاری مستقر شدند:\n"
-                    f"• **سیناپس 🏛️:** تدوین معماری و قراردادهای سرویس (`system_architecture.md`)\n"
-                    f"• **ماتریکس 🌐:** طراحی مدل‌های داده و اسکیمای {stack['language_title']} (`{stack['models_file']}`)\n"
-                    f"• **ولکان ⚡:** کدنویسی کامل بک‌اند و اندپوینت‌ها (`{stack['main_file']}`)\n"
-                    f"• **پریزم 💎:** پیاده‌سازی رابط کاربری کامل و صفحات موردنیاز (`index.html`)\n"
-                    f"• **اوربیت 🚀:** تنظیم فایل پروژه و راهنمای اجرا (`{stack['manifest_file']}`, `README.md`)\n"
-                    f"• **سنتینل ⚔️:** اعتبارسنجی و تست در محیط خط فرمان\n\n"
-                    f"⏳ در حال تولید فایل‌های واقعی پروژه بر پایه **{stack['language_title']}**... لطفاً تب «فایل‌های پروژه» را مشاهده کنید."
+                    f"تسک‌های پروژه برای تولید فایل‌های کالبدی زیر در پوشه کاری آماده شدند:\n"
+                    f"• سند مشخصات و قراردادهای معماری (`system_architecture.md`)\n"
+                    f"• مدل‌های داده و ساختار دیتابیس (`{stack['models_file']}`)\n"
+                    f"• وب‌سرویس اصلی و اندپوینت‌ها (`{stack['main_file']}`)\n"
+                    f"• رابط کاربری و صفحات داشبورد (`index.html`)\n"
+                    f"• مانیفست وابستگی‌ها و راهنمای اجرا (`{stack['manifest_file']}`, `README.md`)\n\n"
+                    f"⏳ فایل‌ها در فضای کاری پروژه مستقر شدند. می‌توانید تب «فایل‌های پروژه» را مشاهده کنید."
                 )
             else:
                 hermes_reply = (
                     f"Excellent! All your specifications have been recorded into the architectural blueprint. 🎯\n\n"
                     f"Selected Stack: **{stack['language_title']}** ({stack['framework']})\n\n"
-                    f"The 12-agent squad led by **Arya 👑** is now deploying into your workspace:\n"
-                    f"• **Synapse 🏛️:** Formulating specs (`system_architecture.md`)\n"
-                    f"• **Matrix 🌐:** Engineering data models (`{stack['models_file']}`)\n"
-                    f"• **Vulcan ⚡:** Synthesizing core service (`{stack['main_file']}`)\n"
-                    f"• **Prism 💎:** Building standalone UI (`index.html`)\n"
-                    f"• **Orbit 🚀:** Manifest and runbook (`{stack['manifest_file']}`, `README.md`)\n"
-                    f"• **Sentinel ⚔️:** Running verification & test suite\n\n"
-                    f"⏳ Generating code deliverables for **{stack['language_title']}** now... Check the 'Project Files' tab!"
+                    f"Project tasks structured for workspace synthesis:\n"
+                    f"• Architecture specifications (`system_architecture.md`)\n"
+                    f"• Data models and schemas (`{stack['models_file']}`)\n"
+                    f"• Core service implementation (`{stack['main_file']}`)\n"
+                    f"• Web interface dashboard (`index.html`)\n"
+                    f"• Dependency manifest and runbook (`{stack['manifest_file']}`, `README.md`)\n\n"
+                    f"⏳ Workspace files ready. Check the 'Project Files' tab!"
                 )
             trigger_build = True
-            chips = ["🔄 وضعیت اجرای ایجنت‌ها", "📁 مشاهده فایل‌های تولیدشده", "⚡ اجرای دستور در ترمینال"]
+            chips = ["📁 مشاهده فایل‌های پروژه", "⚙️ مشخصات و پیکربندی"]
         else:
             # Contextual conversational guidance with LLM or smart stack detection
             trigger_build = False
@@ -224,7 +201,7 @@ class HermesAgentService:
                 key_info = await get_active_api_key(db_session)
                 if key_info and key_info.get("api_key"):
                     sys_prompt = (
-                        f"You are Arya / Hermes, Chief Software Architect for NexusForge. "
+                        f"You are the technical project assistant for NexusForge. "
                         f"Communicate fluently and politely in natural Persian (Farsi). "
                         f"The user is planning a software project: '{project.name}'. "
                         f"The detected target technology stack is: {stack['language_title']} ({stack['framework']}). "
