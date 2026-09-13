@@ -6,19 +6,33 @@ from app.config.settings import get_settings
 
 settings = get_settings()
 
+import os
+import sys
+from sqlalchemy.pool import NullPool
+
+is_test = "pytest" in sys.modules or os.environ.get("TESTING") == "1"
+
 if "sqlite" in settings.database_url:
     engine = create_async_engine(
         settings.database_url,
         echo=settings.debug,
+        poolclass=NullPool if is_test else None,
     )
 else:
-    engine = create_async_engine(
-        settings.database_url,
-        echo=settings.debug,
-        pool_pre_ping=True,
-        pool_size=20,
-        max_overflow=10,
-    )
+    if is_test:
+        engine = create_async_engine(
+            settings.database_url,
+            echo=settings.debug,
+            poolclass=NullPool,
+        )
+    else:
+        engine = create_async_engine(
+            settings.database_url,
+            echo=settings.debug,
+            pool_pre_ping=True,
+            pool_size=20,
+            max_overflow=10,
+        )
 
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
