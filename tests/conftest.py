@@ -31,6 +31,12 @@ def setup_test_db():
 @pytest.fixture(autouse=True)
 async def clean_transient_db_state():
     """Ensure clean tasks, workers, and artifacts state before every test."""
+    import backend.app.db as db_mod
+    if db_mod._engine is not None:
+        await db_mod._engine.dispose()
+        db_mod._engine = None
+        db_mod._session_factory = None
+
     session_factory = get_session_factory()
     async with session_factory() as session:
         await session.execute(delete(Artifact))
@@ -38,8 +44,7 @@ async def clean_transient_db_state():
         await session.execute(delete(Worker))
         await session.commit()
     yield
-    async with session_factory() as session:
-        await session.execute(delete(Artifact))
-        await session.execute(delete(Task))
-        await session.execute(delete(Worker))
-        await session.commit()
+    if db_mod._engine is not None:
+        await db_mod._engine.dispose()
+        db_mod._engine = None
+        db_mod._session_factory = None
