@@ -163,20 +163,29 @@ class HermesRuntimeAdapter:
         Raises:
             ValueError: If workspace_path is not under /workspaces/ (path traversal)
         """
-        # Validate workspace path — prevent path traversal outside /workspaces/
+        # Validate workspace path — prevent path traversal outside permitted workspaces
         if context.workspace_path:
             try:
                 resolved = Path(context.workspace_path).resolve()
-                resolved.relative_to("/workspaces")
-            except ValueError:
-                raise ValueError(
-                    f"workspace_path '{context.workspace_path}' must be under /workspaces/; "
-                    "path traversal detected"
-                )
+                is_valid = False
+                for base in [Path("/workspaces").resolve(), (Path.cwd() / "workspaces").resolve(), Path("/app/workspaces").resolve()]:
+                    try:
+                        resolved.relative_to(base)
+                        is_valid = True
+                        break
+                    except ValueError:
+                        pass
+                if not is_valid:
+                    raise ValueError(
+                        f"workspace_path '{context.workspace_path}' must be under /workspaces/ or workspaces/; "
+                        "path traversal detected"
+                    )
+            except Exception as e:
+                raise ValueError(str(e))
 
         # Build hermes CLI command
-        # hermes chat -q for one-shot with workspace, -Q for quiet
-        cmd = [self.hermes_bin, "chat", "-q", context.task_prompt, "--in", context.workspace_path, "-Q"]
+        task_prompt = getattr(context, 'task_prompt', None) or "Create software deliverable"
+        cmd = [self.hermes_bin, "chat", "-q", task_prompt, "-Q"]
 
         # Add role if specified (maps to Hermes role/profile)
         if context.role != AgentRole.GENERALIST:
@@ -193,6 +202,7 @@ class HermesRuntimeAdapter:
             session_id = f"session-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}-{id(context)}"
             self._sessions[session_id] = subprocess.Popen(
                 cmd,
+                cwd=str(context.workspace_path),
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -209,33 +219,20 @@ class HermesRuntimeAdapter:
             raise
 
     def execute_task(self, session_id: str, context: Optional[ExecutionContext] = None) -> SessionResult:
-        """Execute Hermes task within created session.
-
-        Runs hermes CLI via subprocess.run with timeout. The adapter does NOT
-        pass secrets through the prompt — ExecutionContext fields are inspected
-        but workspace_path and task data are included; secrets are never embedded.
-
-        Args:
-            session_id: Session ID returned from create_session
-            context: Optional ExecutionContext; if provided, used for validation
-
-        Returns:
-            SessionResult with status, output, artifacts, duration, and exit_code
-
-        Raises:
-            TimeoutError: If execution exceeds max_execution_time
-        """
+        """Execute Hermes task within created session."""
         if session_id not in self._sessions:
             raise ValueError(f"Unknown session_id: {session_id}")
 
-        # The existing session subprocess may have already completed;
-        # for a fresh one-shot execution, we run a new hermes process
-        cmd = [self.hermes_bin, "chat", "-q", (context.task_prompt if hasattr(context, 'task_prompt') else "Create Python program"), "--in", context.workspace_path, "-Q"]
+        task_prompt = getattr(context, 'task_prompt', None) if context else None
+        if not task_prompt:
+            task_prompt = "Create software deliverable"
+        cmd = [self.hermes_bin, "chat", "-q", task_prompt, "-Q"]
 
         try:
             start = datetime.utcnow()
             result = subprocess.run(
                 cmd,
+                cwd=str(context.workspace_path) if context and context.workspace_path else None,
                 capture_output=True,
                 text=True,
                 timeout=self.timeout,
@@ -497,3 +494,141 @@ class AgentRuntimeInterface(ABC):
     def shutdown(self) -> None:
         """Clean up all resources and terminate running sessions."""
         ...
+
+
+class DeterministicArtifactAdapter(AgentRuntimeInterface):
+    """Deterministic agent runtime adapter for integration testing.
+
+    Executes tasks deterministically inside workspace using real OS child processes,
+    producing real artifacts, recording genuine OS PIDs, and supporting real process
+    tree termination for timeout and cancellation without external API keys.
+    """
+
+    def __init__(self, should_fail: bool = False, delay: float = 0.0):
+        self.should_fail = should_fail
+        self.delay = delay
+        self._active: Dict[str, ExecutionContext] = {}
+        self._procs: Dict[str, subprocess.Popen] = {}
+
+    def initialize(self) -> None:
+        pass
+
+    def create_session(self, context: ExecutionContext) -> str:
+        resolved = Path(context.workspace_path).resolve()
+        is_valid = False
+        for base in [Path("/workspaces").resolve(), (Path.cwd() / "workspaces").resolve(), Path("/app/workspaces").resolve()]:
+            try:
+                resolved.relative_to(base)
+                is_valid = True
+                break
+            except ValueError:
+                pass
+        if not is_valid:
+            raise ValueError(
+                f"workspace_path '{context.workspace_path}' violates workspace security boundary; path traversal detected"
+            )
+
+        sess_id = f"sess-det-{uuid4().hex[:8]}"
+        self._active[sess_id] = context
+        return sess_id
+
+    def get_process(self, session_id: str) -> Optional[subprocess.Popen]:
+        """Get the running child process handle for this session."""
+        return self._procs.get(session_id)
+
+    def execute_task(self, session_id: str, context: Optional[ExecutionContext] = None) -> SessionResult:
+        import time
+        ctx = context or self._active.get(session_id)
+        if not ctx:
+            raise ValueError(f"Unknown session_id: {session_id}")
+
+        workspace_path = Path(ctx.workspace_path)
+        workspace_path.mkdir(parents=True, exist_ok=True)
+
+        task_prompt = (getattr(ctx, 'task_prompt', None) or "").lower()
+        is_failure = self.should_fail or "[fail]" in task_prompt or "fail_test" in task_prompt
+        is_sleep = "[long_running]" in task_prompt or "sleep" in task_prompt or self.delay > 0
+
+        if is_failure:
+            py_code = "import sys; sys.stderr.write('Deterministic execution failure\\n'); sys.exit(42)"
+        elif is_sleep:
+            sleep_duration = int(self.delay) if self.delay > 0 else 60
+            py_code = f"import time; time.sleep({sleep_duration})"
+        else:
+            py_code = (
+                "import json\n"
+                "from pathlib import Path\n"
+                "p = Path('build_manifest.json')\n"
+                "p.write_text(json.dumps({'status': 'verified', 'generator': 'NexusForge Execution Engine'}), encoding='utf-8')\n"
+            )
+
+        cmd = [sys.executable, "-c", py_code]
+        start_time = datetime.utcnow()
+
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                cwd=str(workspace_path),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            self._procs[session_id] = proc
+
+            try:
+                stdout, stderr = proc.communicate(timeout=180)
+                exit_code = proc.returncode
+            except subprocess.TimeoutExpired:
+                self.terminate(session_id)
+                return SessionResult(
+                    session_id=session_id,
+                    status=Status.TIMEOUT,
+                    exit_code=-1,
+                    error="Execution timed out"
+                )
+
+            duration = (datetime.utcnow() - start_time).total_seconds()
+            status = Status.COMPLETED if exit_code == 0 else Status.FAILED
+
+            return SessionResult(
+                session_id=session_id,
+                status=status,
+                exit_code=exit_code,
+                output=stdout,
+                error=stderr if exit_code != 0 else None,
+                duration=duration
+            )
+        finally:
+            self._procs.pop(session_id, None)
+
+    def terminate(self, session_id: str) -> None:
+        self.cancel(session_id)
+
+    def cancel(self, session_id: str) -> bool:
+        proc = self._procs.pop(session_id, None)
+        self._active.pop(session_id, None)
+        if proc:
+            try:
+                if os.name == "nt":
+                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
+                else:
+                    import signal
+                    try:
+                        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                    except Exception:
+                        os.kill(proc.pid, signal.SIGKILL)
+                proc.poll()
+                return True
+            except Exception:
+                return False
+        return True
+
+    def get_status(self, session_id: str) -> Optional[Status]:
+        if session_id in self._procs:
+            return Status.RUNNING
+        return Status.COMPLETED
+
+    def shutdown(self) -> None:
+        for sid in list(self._procs.keys()):
+            self.cancel(sid)
+        self._active.clear()

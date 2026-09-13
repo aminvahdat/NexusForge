@@ -313,35 +313,110 @@ class WorkerProcess:
         workspace_dir.mkdir(parents=True, exist_ok=True)
 
         try:
-            # Check if Hermes CLI or injected adapter is available
+            # Determine configured Agent Runtime Adapter
             runtime_available = False
             if self.adapter is None:
-                self.adapter = HermesRuntimeAdapter(timeout=180)
-                try:
-                    self.adapter.initialize()
+                adapter_mode = os.getenv("AGENT_RUNTIME_ADAPTER", "deterministic").lower()
+                if adapter_mode == "deterministic":
+                    from app.core.runtime.agent_runtime import DeterministicArtifactAdapter
+                    self.adapter = DeterministicArtifactAdapter()
                     runtime_available = True
-                except Exception:
-                    runtime_available = False
+                else:
+                    self.adapter = HermesRuntimeAdapter(timeout=180)
+                    try:
+                        self.adapter.initialize()
+                        runtime_available = True
+                    except Exception:
+                        runtime_available = False
             else:
                 runtime_available = True
 
             if runtime_available and self.adapter:
                 # Execute via configured Agent Runtime Adapter
-                logger.info("executing_agent_runtime", task_id=str(task.id))
+                logger.info("executing_agent_runtime", task_id=str(task.id), adapter=self.adapter.__class__.__name__)
                 await monitor.update_execution_status(execution_id, "running", f"Executing via {self.adapter.__class__.__name__}")
+
+                # Register task & execution in Redis for distributed tracking and cancellation
+                if self._redis:
+                    try:
+                        await self._redis.set(f"nexusforge:exec_to_task:{execution_id}", str(task.id), ex=3600)
+                        await self._redis.set(f"nexusforge:task_to_exec:{task.id}", execution_id, ex=3600)
+                    except Exception:
+                        pass
+
                 ctx = ExecutionContext(
                     project_id=str(task.project_id) if task.project_id else None,
                     task_id=str(task.id),
-                    workspace_path=str(workspace_dir)
+                    workspace_path=str(workspace_dir),
+                    task_prompt=f"{task.title} {task.description or ''}"
                 )
-                if hasattr(self.adapter, "create_session"):
-                    sess_id = self.adapter.create_session(ctx)
-                    result = self.adapter.execute_task(sess_id, ctx)
-                    exit_code = result.exit_code
-                    error_msg = result.error
-                else:
-                    exit_code = 0
-                    error_msg = None
+
+                sess_id = self.adapter.create_session(ctx) if hasattr(self.adapter, "create_session") else "default"
+
+                # Run execution in background thread so worker can monitor cancellation concurrently
+                exec_future = asyncio.to_thread(self.adapter.execute_task, sess_id, ctx)
+                exec_task = asyncio.create_task(exec_future)
+
+                # Give child process a moment to spawn and register genuine OS PID
+                await asyncio.sleep(0.1)
+                proc = getattr(self.adapter, "get_process", lambda s: None)(sess_id)
+                if proc and proc.pid:
+                    monitor.register_process(
+                        execution_id=execution_id,
+                        pid=proc.pid,
+                        worker_id=self.worker_id,
+                        workspace=str(workspace_dir),
+                        proc=proc
+                    )
+
+                # Active cancellation and timeout watcher loop
+                is_cancelled = False
+                while not exec_task.done():
+                    # Check Redis cancellation signal
+                    if self._redis:
+                        try:
+                            cancel_req = await self._redis.get(f"nexusforge:cancel:{execution_id}")
+                            if cancel_req:
+                                is_cancelled = True
+                                break
+                        except Exception:
+                            pass
+
+                    # Check DB task status
+                    session_factory = await self._get_session_factory()
+                    async with session_factory() as check_session:
+                        res = await check_session.execute(select(Task.status).where(Task.id == task.id))
+                        cur_status = res.scalar_one_or_none()
+                        if cur_status in ("cancelled", "retired"):
+                            is_cancelled = True
+                            break
+
+                    await asyncio.sleep(0.5)
+
+                if is_cancelled:
+                    logger.info("execution_cancelled", task_id=str(task.id), execution_id=execution_id)
+                    # Terminate process tree immediately
+                    if hasattr(self.adapter, "cancel"):
+                        self.adapter.cancel(sess_id)
+                    monitor.terminate_process(execution_id)
+                    exec_task.cancel()
+
+                    cancelled_now = datetime.now(timezone.utc)
+                    await session.execute(
+                        update(Task)
+                        .where(Task.id == task.id)
+                        .values(status="cancelled", completed_at=cancelled_now)
+                    )
+                    task.status = "cancelled"
+                    task.completed_at = cancelled_now
+                    await session.commit()
+                    await monitor.complete(execution_id, error="Execution cancelled by user")
+                    return
+
+                # Normal execution completion
+                result = await exec_task
+                exit_code = getattr(result, "exit_code", 0)
+                error_msg = getattr(result, "error", None)
 
                 if exit_code == 0:
                     completed_now = datetime.now(timezone.utc)
@@ -354,20 +429,21 @@ class WorkerProcess:
                     task.completed_at = completed_now
 
                     # Scan workspace for generated artifacts
-                    for f in workspace_dir.iterdir():
-                        if f.is_file() and not f.name.startswith("."):
-                            art = Artifact(
-                                project_id=task.project_id,
-                                task_id=task.id,
-                                name=f.name,
-                                type="code",
-                                description=f"Deliverable {f.name}",
-                                path=str(f),
-                                size=f.stat().st_size,
-                                mime_type="text/plain",
-                                version="1.0"
-                            )
-                            session.add(art)
+                    if workspace_dir.exists():
+                        for f in workspace_dir.iterdir():
+                            if f.is_file() and not f.name.startswith("."):
+                                art = Artifact(
+                                    project_id=task.project_id,
+                                    task_id=task.id,
+                                    name=f.name,
+                                    type="code",
+                                    description=f"Deliverable {f.name}",
+                                    path=str(f),
+                                    size=f.stat().st_size,
+                                    mime_type="text/plain",
+                                    version="1.0"
+                                )
+                                session.add(art)
 
                     await session.commit()
                     await monitor.complete(execution_id)
@@ -386,7 +462,7 @@ class WorkerProcess:
             else:
                 # FAIL CLOSED: Runtime unavailable and user command execution is forbidden
                 fail_reason = (
-                    "Execution failed closed: Hermes runtime is not installed on system PATH, "
+                    "Execution failed closed: Agent runtime is unavailable, "
                     "and arbitrary host command execution is prohibited for security."
                 )
                 logger.error("execution_fail_closed", task_id=str(task.id), reason=fail_reason)

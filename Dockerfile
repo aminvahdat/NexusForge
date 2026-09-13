@@ -26,8 +26,10 @@ ENV PYTHONPATH=/app/backend:/app
 # For this environment, hermes is available at /home/yellowdeerco/.local/bin/hermes
 # and /home/yellowdeerco/.hermes/hermes-agent/venv/bin/hermes
 
-# Create non-root user
-RUN adduser --disabled-password --gecos '' appuser
+# Create non-root user and ensure workspaces directory exists with appuser ownership
+RUN adduser --disabled-password --gecos '' appuser \
+    && mkdir -p /app/workspaces \
+    && chown -R appuser:appuser /app
 USER appuser
 
 # Expose port

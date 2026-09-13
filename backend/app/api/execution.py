@@ -274,25 +274,49 @@ async def retire_execution(
 ):
     """Retire or cancel an execution with real process termination and worker state reset."""
     state = monitor.active_executions.get(execution_id)
-    if not state:
+    task = None
+    if state:
+        task_result = await db_session.execute(select(Task).where(Task.id == to_uuid(state.task_id)))
+        task = task_result.scalar_one_or_none()
+    else:
+        # Check Redis for distributed execution mapping across containers
+        try:
+            from app.services.redis import get_redis
+            redis = await get_redis()
+            if redis:
+                task_id = await redis.get(f"nexusforge:exec_to_task:{execution_id}")
+                if task_id:
+                    task_result = await db_session.execute(select(Task).where(Task.id == to_uuid(task_id)))
+                    task = task_result.scalar_one_or_none()
+        except Exception:
+            pass
+
+    if not task:
         raise HTTPException(status_code=404, detail=f"Execution {execution_id} not found")
     
     # Phase 12: Authorized Execution Control
-    task_result = await db_session.execute(select(Task).where(Task.id == to_uuid(state.task_id)))
-    task = task_result.scalar_one_or_none()
-    if not task:
-        raise HTTPException(status_code=404, detail="Task associated with execution not found")
     if task.project_id:
         proj_res = await db_session.execute(select(Project).where(Project.id == task.project_id))
         project = proj_res.scalar_one_or_none()
         if project:
             enforce_ownership(project.owner_id, current_user, "execution")
 
-    # Phase 11: Real Process Control - Terminate actual running process tree
+    # Broadcast cancellation via Redis so worker immediately terminates child process
+    try:
+        from app.services.redis import get_redis
+        redis = await get_redis()
+        if redis:
+            await redis.set(f"nexusforge:cancel:{execution_id}", "1", ex=60)
+            await redis.publish("nexusforge:status_updates", f"cancel:{execution_id}")
+    except Exception:
+        pass
+
+    # Phase 11: Real Process Control - Terminate actual running process tree if local
     monitor.terminate_process(execution_id)
 
-    state.status = "retired"
-    state.retired_at = datetime.now(timezone.utc)
+    if state:
+        state.status = "retired"
+        state.retired_at = datetime.now(timezone.utc)
     
     task.status = "cancelled"
     task.updated_at = datetime.now(timezone.utc)
@@ -300,18 +324,25 @@ async def retire_execution(
     # Reset assigned worker state to idle
     from app.models import Worker
     from sqlalchemy import update
-    if state.worker_id:
+    if state and state.worker_id:
         await db_session.execute(
             update(Worker)
             .where(Worker.worker_id == state.worker_id)
             .values(status="idle", current_task_id=None, current_task_count=0)
         )
+    elif task.assigned_worker_id:
+        await db_session.execute(
+            update(Worker)
+            .where(Worker.id == task.assigned_worker_id)
+            .values(status="idle", current_task_id=None, current_task_count=0)
+        )
 
     await db_session.commit()
     
-    await monitor.update_execution_status(
-        execution_id, "retired", f"Execution {execution_id} retired by user request"
-    )
+    if state:
+        await monitor.update_execution_status(
+            execution_id, "retired", f"Execution {execution_id} retired by user request"
+        )
     
     return {
         "execution_id": execution_id,
