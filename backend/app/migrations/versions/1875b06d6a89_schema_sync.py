@@ -14,8 +14,6 @@ depends_on = None
 
 def upgrade() -> None:
     op.add_column('projects', sa.Column('workspace_path', sa.String(length=500), nullable=True))
-    op.add_column('tasks', sa.Column('estimated_tokens', sa.Integer(), nullable=True))
 
 def downgrade() -> None:
-    op.drop_column('tasks', 'estimated_tokens')
     op.drop_column('projects', 'workspace_path')
