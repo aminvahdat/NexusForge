@@ -52,8 +52,8 @@ class WorkerProcess:
     _claim_lock = asyncio.Lock()  # Class-level lock for in-process coroutine concurrency (SQLite)
 
     def __init__(self, worker_id: Optional[str] = None, hostname: Optional[str] = None, adapter: Optional[Any] = None):
-        self.worker_id = worker_id or f"wkr-{os.getpid()}"
         self.hostname = hostname or (hasattr(os, "uname") and os.uname().nodename) or socket.gethostname()
+        self.worker_id = worker_id or f"wkr-{self.hostname}-{os.getpid()}"
         self.adapter = adapter
         self.running = False
         self.heartbeat_task: Optional[asyncio.Task] = None

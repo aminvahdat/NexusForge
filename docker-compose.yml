@@ -50,7 +50,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: ["python", "worker.py", "--worker-id", "nexusforge-worker-01", "--hostname", "worker-01"]
+    command: ["python", "worker.py"]
     environment:
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres_dev_password@postgres:5432/nexusforge
       - REDIS_URL=redis://redis:6379/0
