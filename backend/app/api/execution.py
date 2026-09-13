@@ -348,7 +348,7 @@ async def retire_execution(
         "execution_id": execution_id,
         "status": "retired",
         "message": f"Execution {execution_id} retired",
-        "retired_at": state.retired_at.isoformat()
+        "retired_at": state.retired_at.isoformat() if (state and state.retired_at) else datetime.now(timezone.utc).isoformat()
     }
 
 
