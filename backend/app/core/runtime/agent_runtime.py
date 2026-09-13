@@ -222,75 +222,24 @@ class HermesRuntimeAdapter:
             logger.error("hermes_session_failed", error=str(exc), exc_info=True)
             raise
 
+    def get_process(self, session_id: str) -> Optional[subprocess.Popen]:
+        """Get the running child process handle for this session."""
+        return self._sessions.get(session_id)
+
     def execute_task(self, session_id: str, context: Optional[ExecutionContext] = None) -> SessionResult:
         """Execute Hermes task within created session."""
-        if session_id not in self._sessions:
+        proc = self._sessions.get(session_id)
+        if not proc:
             raise ValueError(f"Unknown session_id: {session_id}")
 
-        task_prompt = getattr(context, 'task_prompt', None) if context else None
-        if not task_prompt:
-            task_prompt = "Create software deliverable"
-        cmd = [self.hermes_bin, "chat", "-q", task_prompt, "-Q"]
-
+        start = datetime.utcnow()
         try:
-            start = datetime.utcnow()
-            result = subprocess.run(
-                cmd,
-                cwd=str(context.workspace_path) if context and context.workspace_path else None,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout,
-            )
-            duration = (datetime.utcnow() - start).total_seconds()
-
-            exit_code = result.returncode
-            stderr = result.stderr or ""
-            stdout = result.stdout or ""
-
-            # Determine status from exit code and output
-            if exit_code == 0 or ("completed" in stdout.lower() or "completed" in stderr.lower()):
-                status = Status.COMPLETED
-            elif exit_code == 124 or "timeout" in stdout.lower() or "timeout" in stderr.lower():
-                status = Status.FAILED
-                # Force timeout marking if we hit subprocess timeout
-                if exit_code != 124:
-                    # subprocess.TimeoutExpired — but we use subprocess.run not Popen
-                    status = Status.FAILED
-            elif exit_code == -9 or "killed" in stdout.lower() or "killed" in stderr.lower():
-                status = Status.CANCELLED
-            else:
-                status = Status.FAILED
-
-            artifacts: List[str] = []
-            # Collect artifact paths from workspace if any exist
-            import os
-            ws = context.workspace_path if context else "/workspaces/global"
-            if os.path.isdir(ws):
-                for f in os.listdir(ws):
-                    fp = os.path.join(ws, f)
-                    if os.path.isfile(fp):
-                        artifacts.append(fp)
-
-            session_result = SessionResult(
-                session_id=session_id,
-                status=status,
-                output=stdout,
-                artifacts=artifacts,
-                execution_duration_sec=duration,
-                error=stderr if status == Status.FAILED else None,
-                exit_code=exit_code,
-            )
-
-            logger.info(
-                "hermes_task_executed",
-                session_id=session_id,
-                status=status.value,
-                exit_code=exit_code,
-                duration=duration,
-            )
-            return session_result
-
+            stdout_bytes, stderr_bytes = proc.communicate(timeout=self.timeout)
+            exit_code = proc.returncode
+            stdout = stdout_bytes.decode("utf-8", errors="replace") if isinstance(stdout_bytes, bytes) else (stdout_bytes or "")
+            stderr = stderr_bytes.decode("utf-8", errors="replace") if isinstance(stderr_bytes, bytes) else (stderr_bytes or "")
         except subprocess.TimeoutExpired:
+            self.terminate(session_id)
             logger.error(
                 "hermes_task_timed_out",
                 session_id=session_id,
@@ -299,47 +248,58 @@ class HermesRuntimeAdapter:
             return SessionResult(
                 session_id=session_id,
                 status=Status.FAILED,
-                execution_duration_sec=self.timeout,
+                execution_duration_sec=float(self.timeout),
                 error=f"Execution exceeded {self.timeout}s timeout",
                 exit_code=-1,
             )
+        finally:
+            self._sessions.pop(session_id, None)
+
+        duration = (datetime.utcnow() - start).total_seconds()
+
+        # Strict execution semantics: ONLY genuine returncode 0 is COMPLETED
+        if exit_code == 0:
+            status = Status.COMPLETED
+        elif exit_code in (-9, 137, 143):
+            status = Status.CANCELLED
+        else:
+            status = Status.FAILED
+
+        artifacts: List[str] = []
+        # Collect artifact paths from workspace if any exist
+        import os
+        ws = context.workspace_path if context else "/workspaces/global"
+        if os.path.isdir(ws):
+            for f in os.listdir(ws):
+                fp = os.path.join(ws, f)
+                if os.path.isfile(fp) and not f.startswith("."):
+                    artifacts.append(fp)
+
+        session_result = SessionResult(
+            session_id=session_id,
+            status=status,
+            output=stdout,
+            artifacts=artifacts,
+            execution_duration_sec=duration,
+            error=stderr if status == Status.FAILED else None,
+            exit_code=exit_code,
+        )
+
+        logger.info(
+            "hermes_task_executed",
+            session_id=session_id,
+            status=status.value,
+            exit_code=exit_code,
+            duration=duration,
+        )
+        return session_result
 
     def cancel(self, session_id: str) -> bool:
-        """Attempt to cancel an ongoing Hermes session.
-
-        Sets session state to STOPPING; does NOT kill subprocess (no signal
-        sent to child; documented limitation — cancelling a subprocess.run()
-        that's already completing is not reliably possible).
-
-        Args:
-            session_id: Session ID to cancel
-
-        Returns:
-            True if cancellation was initiated, False if session not found
-        """
-        if session_id not in self._sessions:
-            logger.warning("cancellation_failed", session_id=session_id, reason="session not found")
-            return False
-
-        # Mark as stopping — does NOT terminate subprocess
-        # The adapter tracks state but cannot reliably kill a running subprocess
-        # from subprocess.run() without Popen management
-        self._sessions[session_id]  # access to confirm it exists
-        logger.info("hermes_session_cancelled", session_id=session_id)
-        return True
+        """Attempt to cancel an ongoing Hermes session and terminate process tree."""
+        return self.terminate(session_id)
 
     def terminate(self, session_id: str) -> bool:
-        """Terminate a Hermes session and associated subprocess.
-
-        Uses Popen.terminate() if the session is a Popen instance;
-        otherwise no-op. Guarantees session_id removal from tracking.
-
-        Args:
-            session_id: Session ID to terminate
-
-        Returns:
-            True if termination was performed, False if session not found
-        """
+        """Terminate a Hermes session and associated subprocess."""
         if session_id not in self._sessions:
             logger.warning("termination_failed", session_id=session_id, reason="session not found")
             return False
@@ -347,9 +307,16 @@ class HermesRuntimeAdapter:
         proc = self._sessions.pop(session_id, None)
         if proc is not None:
             try:
-                proc.terminate()
-                proc.wait(timeout=5)
-                logger.info("hermes_session_terminated", session_id=session_id)
+                if os.name == "nt":
+                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
+                else:
+                    import signal
+                    try:
+                        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                    except Exception:
+                        os.kill(proc.pid, signal.SIGKILL)
+                proc.poll()
+                logger.info("hermes_session_terminated", session_id=session_id, pid=proc.pid)
             except Exception:
                 try:
                     proc.kill()
@@ -358,23 +325,9 @@ class HermesRuntimeAdapter:
         return True
 
     def get_status(self, session_id: str) -> Optional[Status]:
-        """Get the current status of a Hermes session.
-
-        Since we use subprocess.run() (not persistent Popen), the session
-        always completes before we can check status. This method returns
-        the last known status or None if session not tracked.
-
-        Args:
-            session_id: Session ID to check
-
-        Returns:
-            Last known Status, or None if session not tracked
-        """
+        """Get the current status of a Hermes session."""
         if session_id in self._sessions:
-            # Session still alive (rare with subprocess.run pattern)
             return Status.RUNNING
-        # Session completed — we'd need to track this separately
-        # For now, return None; caller should check execution result
         return None
 
     def shutdown(self) -> None:
@@ -498,149 +451,3 @@ class AgentRuntimeInterface(ABC):
     def shutdown(self) -> None:
         """Clean up all resources and terminate running sessions."""
         ...
-
-
-class DeterministicArtifactAdapter(AgentRuntimeInterface):
-    """Deterministic agent runtime adapter for integration testing.
-
-    Executes tasks deterministically inside workspace using real OS child processes,
-    producing real artifacts, recording genuine OS PIDs, and supporting real process
-    tree termination for timeout and cancellation without external API keys.
-    """
-
-    def __init__(self, should_fail: bool = False, delay: float = 0.0):
-        self.should_fail = should_fail
-        self.delay = delay
-        self._active: Dict[str, ExecutionContext] = {}
-        self._procs: Dict[str, subprocess.Popen] = {}
-
-    def initialize(self) -> None:
-        pass
-
-    def create_session(self, context: ExecutionContext) -> str:
-        resolved = Path(context.workspace_path).resolve()
-        is_valid = False
-        for base in [Path("/workspaces").resolve(), (Path.cwd() / "workspaces").resolve(), Path("/app/workspaces").resolve()]:
-            try:
-                resolved.relative_to(base)
-                is_valid = True
-                break
-            except ValueError:
-                pass
-        if not is_valid:
-            raise ValueError(
-                f"workspace_path '{context.workspace_path}' violates workspace security boundary; path traversal detected"
-            )
-
-        sess_id = f"sess-det-{uuid4().hex[:8]}"
-        self._active[sess_id] = context
-        return sess_id
-
-    def get_process(self, session_id: str) -> Optional[subprocess.Popen]:
-        """Get the running child process handle for this session."""
-        return self._procs.get(session_id)
-
-    def execute_task(self, session_id: str, context: Optional[ExecutionContext] = None) -> SessionResult:
-        import time
-        ctx = context or self._active.get(session_id)
-        if not ctx:
-            raise ValueError(f"Unknown session_id: {session_id}")
-
-        workspace_path = Path(ctx.workspace_path)
-        workspace_path.mkdir(parents=True, exist_ok=True)
-
-        task_prompt = (getattr(ctx, 'task_prompt', None) or "").lower()
-        is_failure = self.should_fail or "[fail]" in task_prompt or "fail_test" in task_prompt
-        is_sleep = "[long_running]" in task_prompt or "sleep" in task_prompt or self.delay > 0
-
-        if is_failure:
-            py_code = "import sys; sys.stderr.write('Deterministic execution failure\\n'); sys.exit(42)"
-        elif is_sleep:
-            sleep_duration = int(self.delay) if self.delay > 0 else 60
-            py_code = f"import time; time.sleep({sleep_duration})"
-        elif "concurrent" in task_prompt or "[concurrent]" in task_prompt:
-            py_code = (
-                "import json, time\n"
-                "time.sleep(2.5)\n"
-                "from pathlib import Path\n"
-                "p = Path('build_manifest.json')\n"
-                "p.write_text(json.dumps({'status': 'verified', 'generator': 'NexusForge Execution Engine'}), encoding='utf-8')\n"
-            )
-        else:
-            py_code = (
-                "import json\n"
-                "from pathlib import Path\n"
-                "p = Path('build_manifest.json')\n"
-                "p.write_text(json.dumps({'status': 'verified', 'generator': 'NexusForge Execution Engine'}), encoding='utf-8')\n"
-            )
-
-        cmd = [sys.executable, "-c", py_code]
-        start_time = datetime.utcnow()
-
-        try:
-            proc = subprocess.Popen(
-                cmd,
-                cwd=str(workspace_path),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-            self._procs[session_id] = proc
-
-            try:
-                stdout, stderr = proc.communicate(timeout=180)
-                exit_code = proc.returncode
-            except subprocess.TimeoutExpired:
-                self.terminate(session_id)
-                return SessionResult(
-                    session_id=session_id,
-                    status=Status.TIMEOUT,
-                    exit_code=-1,
-                    error="Execution timed out"
-                )
-
-            duration = (datetime.utcnow() - start_time).total_seconds()
-            status = Status.COMPLETED if exit_code == 0 else Status.FAILED
-
-            return SessionResult(
-                session_id=session_id,
-                status=status,
-                exit_code=exit_code,
-                output=stdout,
-                error=stderr if exit_code != 0 else None,
-                execution_duration_sec=duration
-            )
-        finally:
-            self._procs.pop(session_id, None)
-
-    def terminate(self, session_id: str) -> None:
-        self.cancel(session_id)
-
-    def cancel(self, session_id: str) -> bool:
-        proc = self._procs.pop(session_id, None)
-        self._active.pop(session_id, None)
-        if proc:
-            try:
-                if os.name == "nt":
-                    subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
-                else:
-                    import signal
-                    try:
-                        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-                    except Exception:
-                        os.kill(proc.pid, signal.SIGKILL)
-                proc.poll()
-                return True
-            except Exception:
-                return False
-        return True
-
-    def get_status(self, session_id: str) -> Optional[Status]:
-        if session_id in self._procs:
-            return Status.RUNNING
-        return Status.COMPLETED
-
-    def shutdown(self) -> None:
-        for sid in list(self._procs.keys()):
-            self.cancel(sid)
-        self._active.clear()

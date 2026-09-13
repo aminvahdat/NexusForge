@@ -316,18 +316,17 @@ class WorkerProcess:
             # Determine configured Agent Runtime Adapter
             runtime_available = False
             if self.adapter is None:
-                adapter_mode = os.getenv("AGENT_RUNTIME_ADAPTER", "deterministic").lower()
-                if adapter_mode == "deterministic":
-                    from app.core.runtime.agent_runtime import DeterministicArtifactAdapter
-                    self.adapter = DeterministicArtifactAdapter()
-                    runtime_available = True
-                else:
+                adapter_mode = os.getenv("AGENT_RUNTIME_ADAPTER", "hermes").lower()
+                if adapter_mode == "hermes":
                     self.adapter = HermesRuntimeAdapter(timeout=180)
                     try:
                         self.adapter.initialize()
                         runtime_available = True
-                    except Exception:
+                    except Exception as exc:
+                        logger.warning("hermes_runtime_init_failed", error=str(exc))
                         runtime_available = False
+                else:
+                    runtime_available = False
             else:
                 runtime_available = True
 
