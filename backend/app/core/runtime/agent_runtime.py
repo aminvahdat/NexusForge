@@ -558,6 +558,14 @@ class DeterministicArtifactAdapter(AgentRuntimeInterface):
         elif is_sleep:
             sleep_duration = int(self.delay) if self.delay > 0 else 60
             py_code = f"import time; time.sleep({sleep_duration})"
+        elif "concurrent" in task_prompt or "[concurrent]" in task_prompt:
+            py_code = (
+                "import json, time\n"
+                "time.sleep(2.5)\n"
+                "from pathlib import Path\n"
+                "p = Path('build_manifest.json')\n"
+                "p.write_text(json.dumps({'status': 'verified', 'generator': 'NexusForge Execution Engine'}), encoding='utf-8')\n"
+            )
         else:
             py_code = (
                 "import json\n"
