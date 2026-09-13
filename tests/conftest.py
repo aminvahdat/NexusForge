@@ -22,7 +22,10 @@ from backend.app.models import Task, Worker, Artifact
 def setup_test_db():
     """Ensure database schema is created before running test suite."""
     import asyncio
+    from backend.app.db import get_engine, init_database
     asyncio.run(init_database())
+    engine = get_engine()
+    asyncio.run(engine.dispose())
 
 
 @pytest.fixture(autouse=True)
